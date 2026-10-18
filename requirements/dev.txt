@@ -1,0 +1,4 @@
+# Everything, plus test and lint tools. Install this one for local development.
+-r ops.txt
+pytest>=9.1,<10
+ruff

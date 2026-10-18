@@ -1,0 +1,9 @@
+# Sub-project 1: Foundations (stages 0-5). No agent framework.
+openai>=3.26,<4
+anthropic>=1.12,<2
+pydantic>=2.13,<3
+langfuse>=4.17,<5
+typer>=0.27,<1
+pyyaml>=6.0,<7
+tenacity>=9.2,<10
+python-dotenv>=1.0,<2
