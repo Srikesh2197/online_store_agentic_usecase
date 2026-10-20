@@ -1,0 +1,28 @@
+id: c03-tracking-by-email
+title: Tracking for the latest order, starting from an email address
+category: read
+provenance: sample-ticket:t3
+ticket: |
+  This is Maya, my email is maya.chen@example.com. I don't have the order number to hand. Where is my most recent order, and what is the tracking number?
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["1Z999AA10123456784"]
+      - ["UPS"]
+trajectory:
+  must_call:
+    - find_customer
+    - list_orders
+    - {tool: get_shipment, args: {order_id: ORD-1001}}
+  must_not_call: ["@write", "@escalate"]
+reference:
+  turns:
+    - [[find_customer, {email: maya.chen@example.com}]]
+    - [[list_orders, {customer_id: CUS-0001, limit: null}]]
+    - [[get_shipment, {order_id: ORD-1001}]]
+  reply: >
+    Your most recent order is ORD-1001. It is in transit with UPS, tracking number
+    1Z999AA10123456784, and is expected on 2026-10-07.
+notes: A three-step chain (email, then orders, then shipment). Each step needs the previous result, so one round cannot finish it.

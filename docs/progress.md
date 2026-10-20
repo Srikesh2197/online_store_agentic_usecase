@@ -58,7 +58,7 @@ Five tickets, one run each: $0.00103 in total, 1.6 to 5.6 s per run. A one-line 
 
 ## Stage 1: Two providers and the full toolset — built 2026-10-18
 
-Branch `feature_0918_01`. Not committed. Write-up: [stages/01-two-providers.md](stages/01-two-providers.md).
+Branch `feature_0918_01`, committed as fcf36d5 and merged to main. Write-up: [stages/01-two-providers.md](stages/01-two-providers.md).
 
 ### What was built
 
@@ -126,3 +126,74 @@ A request with ten tools is about 1,830 input tokens on OpenAI and 3,680 on Haik
 - How reliable is the closing instruction over many trials? It was tested once on 5 tickets.
 - Haiku's broken output under `tool_choice: none` is undocumented. Does it recur in the Stage 3 loop when a step cap forces a final answer?
 - Should the Stage 3 loop drop the closing instruction, since the model is no longer cut off? Or keep it for the step-cap exit?
+
+## Stage 2: Eval harness and baseline — built 2026-10-20
+
+Branch `feature_0919_01`. Not committed. Write-up: [stages/02-eval-harness.md](stages/02-eval-harness.md).
+
+### What was built
+
+| Path | Contents |
+|---|---|
+| `src/arl/evals/tasks.py`, `tasks/capability/c01…c20.yaml` | Strict task model, consistency checks, 20 tasks (6 read, 6 write, 4 refuse, 4 escalate), each with a reference solution |
+| `src/arl/evals/dbdiff.py` | Snapshot by `id`; diff of inserts, deletes, column updates |
+| `src/arl/evals/transcript.py` | `Transcript` from the JSONL trace; `replay_reference()` runs a task's reference with no model |
+| `src/arl/evals/graders/` | `outcome.py` (db, facts, hygiene), `trajectory.py` (must_call, must_not_call, order), `grade()` → `Verdict` |
+| `src/arl/evals/runner.py` | Estimate, sweep with a hard cap, error halt, results JSON, ledger |
+| `src/arl/evals/report.py` | Summary, categories, per-task variance, paired table with sign test, `--show`, `--regrade` |
+| `src/arl/cli.py` | `arl eval` and `arl report` |
+| `src/arl/tracing/tracer.py` | Optional `phase` tag (default unchanged) |
+| `results/` | 4 sweep files, `spend.csv`, `report-phase2-baseline.md`, `review/phase2-ten-transcripts.md` |
+| `tests/` | 214 tests (111 new), no API calls |
+
+### Decisions made
+
+- **Success** = db ∧ facts ∧ hygiene ∧ trajectory, and each component is reported. API failures are error trials, left out of the rates.
+- **"Check before act"** means an earlier *model turn*. Calls in the same parallel batch do not count.
+- **Failed calls:** must_call counts only successful calls; must_not_call counts every attempt.
+- **Proven tasks:** every task carries a reference solution, and a test replays it against a fresh store.
+- **Cost cap:** before each trial, halt if spent + that trial's worst case > cap. Spend is read from the logged model calls.
+- **Re-grading:** results store a compact transcript per trial, so `arl report --regrade` re-grades from a clean checkout.
+- **Primary model `gpt-6-luna`, secondary `claude-haiku-5-5`.** The selection rule was fixed before the runs. No model led by more than the detectable difference, so the cheapest won.
+- **c15 is a refusal, not an escalation.** c16's "already" fact stays strict.
+- The seed defect (three deliveries after SIM_TODAY) is recorded but not fixed. The tasks avoid those orders.
+
+### Measured in stage 2
+
+- 160 trials: gpt-6-luna 20 × 5; gpt-5.6-luna, gpt-5-mini and Haiku 5.5 20 × 1 each. Spend **$0.093** of the $1.50 budget, against an estimate of $0.20.
+- **Rung-1 success:**
+
+  | gpt-6-luna | gpt-5.6-luna | gpt-5-mini | Haiku 5.5 |
+  |---|---|---|---|
+  | 43% (pass^5 35%) | 45% | 45% | 50% |
+
+  - Writes: 0/60 across all models.
+  - Escalations: only c19 passed (a person requested; no lookup needed).
+  - Hygiene: 100%. No write tool was ever called.
+- **$/run:** gpt-6-luna $0.00016, gpt-5.6-luna $0.00038, Haiku $0.00075, gpt-5-mini $0.0027. p50 latency 3.4–11.9 s.
+- **Transcript review:** 3 of 10 verdicts were phrase-list false negatives, now fixed. The db, hygiene and trajectory checks were right in all 10.
+
+### What stage 3 needs to know
+
+- **The harness is the comparison.**
+  - Run the loop as a new strategy through the same `run_sweep`. The runner currently imports `run_single_round` directly, so add a strategy argument rather than a second runner.
+  - Keep `STRATEGY` in the results, so the report labels the arms.
+  - Make the Stage 3 table with `arl report <rung-1 file> <rung-2 file>`.
+- **Run every compared arm at k ≥ 3.** Paired tables between a k5 arm and a k1 arm count 4/5 against 1/1 as a win.
+- **Where rung 2 should gain:** the 6 writes, c03, c17, c18 and c20 all failed because the round ended. All of them depend on order rules ("look, then act in a later turn"), which only a loop can satisfy.
+- **Where rung 2 could lose:** c19 and c15 show models escalating in round 1. A loop gives more chances to act wrongly, so watch must_not_call and db on the refuse tasks.
+- **Measured costs replace the plan's basis.**
+  - A call is about 1,850–2,150 input tokens on OpenAI (98% cached on request 1) and about 3,700–4,100 on Haiku.
+  - A 4-call loop run should cost about $0.0003–0.0005 on gpt-6-luna and $0.0012–0.0015 on Haiku.
+  - Stage 3's planned runs should cost about $0.15–0.50, not $3.50.
+  - The estimator now uses measured cost per trial for models already swept. Its worst case assumes 2 calls (`CALLS_PER_TRIAL`), so a loop strategy must set its own worst case: step cap × the per-call worst case.
+- **Haiku cache:** request 1 wrote about 3,690 tokens to the cache on every task and read none. An explicit breakpoint before the ticket is still untested.
+- **The closing instruction** held over 160 trials (no hygiene failures, no false-claim phrases). The loop may still need it at the step-cap exit.
+- **Facts checks are the brittle part.** When a new failure looks odd, read it with `arl report <file> --show <task> --trial N` before trusting it.
+- **Tests:** 214 pass. The `test_recorded.py` fixtures are unchanged; the request shape did not change.
+
+### Open questions carried forward
+
+- Does an explicit cache breakpoint before the ticket bring Haiku's request-1 cost near OpenAI's?
+- Is c15 (refuse against escalate) a fair test, given that the policy line "anything outside these rules is escalated" invites escalation? Revisit when the Stage 4 failure taxonomy is built.
+- Would 20 × 5 on all four models change the model choice? It would cost about $0.35, and it is only needed if Stage 3 shows the primary struggling in a loop.

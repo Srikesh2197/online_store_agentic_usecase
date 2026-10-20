@@ -1,0 +1,21 @@
+id: c01-status-shipped
+title: Status of one order that has shipped
+category: read
+provenance: sample-ticket:t1
+ticket: |
+  Hi, can you tell me the status of my order ORD-1001?
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["shipped", "in transit", "on its way", "on the way"]
+trajectory:
+  must_call:
+    - {tool: get_order, args: {order_id: ORD-1001}}
+  must_not_call: ["@write", "@escalate"]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-1001}]]
+  reply: Your order ORD-1001 has shipped and is on its way.
+notes: ORD-1001 is shipped; its shipment SHP-5001 is in transit, estimated 2026-10-07.

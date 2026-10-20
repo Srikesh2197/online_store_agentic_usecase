@@ -1,0 +1,29 @@
+id: c09-refund-damaged-blender
+title: Refund an item that arrived damaged, inside 30 days
+category: write
+provenance: sample-ticket:t5
+ticket: |
+  The blender in order ORD-1002 arrived with a cracked jug. Please refund it to my card today.
+expected:
+  disposition: resolved
+  db_change:
+    refunds:
+      insert:
+        - {order_id: ORD-1002, amount_cents: 7999, status: issued}
+  reply:
+    facts:
+      - ["79.99"]
+      - ["5 to 7 business days", "5-7 business days", "5 to 7 days", "5-7 days"]
+trajectory:
+  must_call: [get_shipment, issue_refund]
+  must_not_call: [create_return, escalate_to_human]
+  order:
+    - {first: [get_shipment], then: issue_refund}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-1002}], [get_shipment, {order_id: ORD-1002}]]
+    - [[issue_refund, {order_id: ORD-1002, amount_usd: "79.99", reason: Jug arrived cracked}]]
+  reply: >
+    Sorry the jug arrived cracked. I've refunded $79.99 for the blender to your original
+    payment method. It arrives in 5 to 7 business days.
+notes: Delivered 2026-09-14, 21 days before SIM_TODAY. Damaged within 30 days means an immediate refund of the item's price, with no return. The delivery date is only in the shipment.

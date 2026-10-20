@@ -1,0 +1,27 @@
+id: c06-unknown-order
+title: An order ID that does not exist
+category: read
+provenance: written-up-front
+ticket: |
+  Can you check on order ORD-1999 for me? I haven't heard anything about it.
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["couldn't find", "could not find", "can't find", "cannot find", "unable to find",
+         "wasn't able to find", "was not able to find", "not able to find", "didn't find",
+         "did not find", "no order", "no record", "doesn't exist", "does not exist",
+         "doesn't match", "does not match"]
+      - ["check", "confirm", "double"]
+    must_not_say: ["has shipped", "is shipped", "was delivered", "has been delivered",
+                   "is being processed", "is processing", "in transit"]
+trajectory:
+  must_not_call: ["@write", "@escalate"]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-1999}]]
+  reply: >
+    I couldn't find an order with the ID ORD-1999. Could you check the order number in your
+    confirmation email?
+notes: The policy says to say so and ask the customer to check the detail, not to guess and not to escalate.

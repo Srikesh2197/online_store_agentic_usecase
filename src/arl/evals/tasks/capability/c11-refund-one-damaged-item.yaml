@@ -1,0 +1,29 @@
+id: c11-refund-one-damaged-item
+title: Refund only the damaged item in a multi-item order
+category: write
+provenance: written-up-front
+ticket: |
+  The yoga mat from order ORD-2016 arrived with a big tear in it. The tent and the notebook are fine. Can I get my money back for the mat?
+expected:
+  disposition: resolved
+  db_change:
+    refunds:
+      insert:
+        - {order_id: ORD-2016, amount_cents: 3800, status: issued}
+  reply:
+    facts:
+      - ["38.00"]
+      - ["5 to 7 business days", "5-7 business days", "5 to 7 days", "5-7 days"]
+trajectory:
+  must_call: [get_shipment, issue_refund]
+  must_not_call: [create_return, escalate_to_human]
+  order:
+    - {first: [get_shipment], then: issue_refund}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2016}], [get_shipment, {order_id: ORD-2016}]]
+    - [[issue_refund, {order_id: ORD-2016, amount_usd: "38.00", reason: Yoga mat arrived torn}]]
+  reply: >
+    Sorry about the torn mat. I've refunded $38.00 to your original payment method; it
+    arrives in 5 to 7 business days.
+notes: Delivered 2026-10-04. The refund is the price of the affected item (38.00), not the order total (238.00).

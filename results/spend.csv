@@ -1,0 +1,5 @@
+ts_utc,sweep_id,phase,strategy,model,task_set,tasks,trials_per_task,trials_planned,trials_run,est_usd,worst_usd,cap_usd,spent_usd,status,results_file,git_commit
+2026-10-20T02:50:55+00:00,20261020T024342Z-single_round-gpt-6-luna-k5,phase-2,single_round,gpt-6-luna,capability,20,5,100,100,0.086317,0.261317,0.3000,0.016195,completed,20261020T024342Z-single_round-gpt-6-luna-k5.json,fcf36d5-dirty
+2026-10-20T02:52:11+00:00,20261020T025106Z-single_round-gpt-5.6-luna-k1,phase-2,single_round,gpt-5.6-luna,capability,20,1,20,20,0.037730,0.120530,0.1500,0.007550,completed,20261020T025106Z-single_round-gpt-5.6-luna-k1.json,fcf36d5-dirty
+2026-10-20T02:56:23+00:00,20261020T025222Z-single_round-gpt-5-mini-k1,phase-2,single_round,gpt-5-mini,capability,20,1,20,20,0.050527,0.184527,0.2000,0.054066,completed,20261020T025222Z-single_round-gpt-5-mini-k1.json,fcf36d5-dirty
+2026-10-20T02:58:52+00:00,20261020T025633Z-single_round-claude-haiku-5-5-k1,phase-2,single_round,claude-haiku-5-5,capability,20,1,20,20,0.026565,0.061565,0.1000,0.014924,completed,20261020T025633Z-single_round-claude-haiku-5-5-k1.json,fcf36d5-dirty

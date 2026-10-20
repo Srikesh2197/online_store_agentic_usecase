@@ -46,8 +46,9 @@ class _Record:
 
 
 class Tracer:
-    def __init__(self, run_id: str, log_dir: Path = RUNS_DIR, langfuse=None):
+    def __init__(self, run_id: str, log_dir: Path = RUNS_DIR, langfuse=None, phase: str = PHASE):
         self.run_id = run_id
+        self.phase = phase
         self.path = Path(log_dir) / f"{run_id}.jsonl"
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.trace_url: str | None = None
@@ -83,7 +84,7 @@ class Tracer:
                 stack.enter_context(
                     propagate_attributes(
                         trace_name=f"{strategy}:{ticket_id}",
-                        tags=[PHASE, strategy, provider, model],
+                        tags=[self.phase, strategy, provider, model],
                         metadata={"run_id": self.run_id, "ticket_id": ticket_id,
                                   "provider": provider},
                     )

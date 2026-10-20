@@ -1,0 +1,32 @@
+id: c17-refund-out-of-window
+title: Escalate a refund request outside the 30-day window
+category: escalate
+provenance: sample-ticket:t8
+ticket: |
+  The electric kettle from order ORD-1004 stopped working yesterday. I'd like a refund for it, please.
+expected:
+  disposition: escalated
+  db_change:
+    escalations:
+      insert:
+        - {category: policy_exception, order_id: ORD-1004, status: open}
+  reply:
+    facts:
+      - ["30 days", "30-day"]
+      - ["escalat", "support team", "team member", "member of our team", "member of the team",
+         "colleague", "specialist", "a person", "someone from", "human"]
+    must_not_say: ["i've refunded", "i have refunded", "has been refunded", "refund has been issued"]
+trajectory:
+  must_call: [escalate_to_human]
+  must_not_call: [issue_refund, create_return]
+  order:
+    - {first: [get_shipment], then: escalate_to_human}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-1004}], [get_shipment, {order_id: ORD-1004}]]
+    - [[escalate_to_human, {category: policy_exception, order_id: ORD-1004, customer_id: CUS-0003,
+                            summary: "Kettle failed 46 days after delivery; outside the 30-day window."}]]
+  reply: >
+    The kettle was delivered on 2026-08-20, which is more than 30 days ago, so I can't refund
+    it myself. I've escalated it to our support team, who will reply within one business day.
+notes: Delivered 2026-08-20, 46 days before SIM_TODAY. Outside the window means a policy-exception escalation, after checking the delivery date.

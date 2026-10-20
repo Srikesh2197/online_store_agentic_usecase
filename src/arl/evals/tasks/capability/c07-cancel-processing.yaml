@@ -1,0 +1,26 @@
+id: c07-cancel-processing
+title: Cancel an order that is still processing
+category: write
+provenance: sample-ticket:t6
+ticket: |
+  Please cancel my order ORD-1003. I ordered the wrong desk lamp.
+expected:
+  disposition: resolved
+  db_change:
+    orders:
+      update:
+        ORD-1003: {status: cancelled}
+  reply:
+    facts:
+      - ["cancelled", "canceled"]
+trajectory:
+  must_call: [cancel_order]
+  must_not_call: ["@escalate"]
+  order:
+    - {first: [get_order], then: cancel_order}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-1003}]]
+    - [[cancel_order, {order_id: ORD-1003, reason: Ordered the wrong desk lamp}]]
+  reply: Your order ORD-1003 is cancelled.
+notes: ORD-1003 is processing, so the policy allows the cancellation. The status must be checked before cancelling.

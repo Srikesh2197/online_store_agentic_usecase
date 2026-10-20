@@ -96,3 +96,89 @@ def run(
         f"log: {tracer.path.relative_to(ROOT)}\n"
         f"langfuse: {tracer.trace_url or 'not configured'}"
     )
+
+
+@app.command("eval")
+def eval_(
+    model: str = typer.Option(None, "--model", "-m",
+                              help="Model id. Default: `default` in config/models.yaml."),
+    trials: int = typer.Option(5, "--trials", "-k", min=1, help="Trials per task."),
+    tasks: str = typer.Option("all", "--tasks",
+                              help="all, a category (read/write/refuse/escalate), or ids: c01,c07"),
+    cap: float = typer.Option(0.50, "--cap", help="Hard cost cap for this sweep, in US dollars."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the estimate and stop."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask before spending."),
+    langfuse: bool = typer.Option(False, "--langfuse",
+                                  help="Mirror up to 30 trials of this sweep to Langfuse."),
+) -> None:
+    """Run the task set through the single round, k trials per task, under a cost cap."""
+    from arl.evals import report, runner
+    from arl.evals.tasks import load_tasks, select
+    from arl.llm.pricing import load_models
+
+    model = model or load_models()["default"]
+    try:
+        chosen = select(load_tasks(), tasks)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--tasks") from exc
+    est = runner.estimate(chosen, model, trials)
+    spent = runner.phase_spent()
+    typer.secho("===== ESTIMATE =====", bold=True)
+    typer.echo(
+        f"sweep:     {runner.STRATEGY} · {model} · {len(chosen)} tasks × {trials} trials "
+        f"= {est.trials} trials\n"
+        f"expected:  ${est.expected_usd:.4f}  (${est.per_trial_expected:.6f} per trial; "
+        f"{est.basis})\n"
+        f"worst:     ${est.worst_usd:.4f}  (${est.per_trial_worst:.6f} per trial: every call "
+        f"at max_tokens, no cache)\n"
+        f"cap:       ${cap:.4f}  (the sweep halts before any trial whose worst case would "
+        f"cross it)\n"
+        f"{runner.PHASE} spent so far: ${spent:.4f} of about ${runner.PHASE_BUDGET_USD:.2f}"
+    )
+    if est.worst_usd > cap:
+        typer.secho("note: the worst case is above the cap, so the cap may halt this sweep.",
+                    fg="yellow")
+    if dry_run:
+        return
+    if not yes:
+        typer.confirm("Run this sweep?", abort=True)
+
+    from arl.llm import make_adapter
+    from arl.tracing.tracer import langfuse_client
+
+    def progress(record: dict, total: float) -> None:
+        result = {True: "pass", False: "FAIL", None: "ERROR"}[record["success"]]
+        failed = [c["name"] for c in record["verdict"]["checks"] if not c["passed"]]
+        typer.echo(f"{record['task_id']:<30} k{record['trial']}  {result:<5} "
+                   f"${record['cost_usd']:.6f}  {(record['latency_ms'] or 0) / 1000:5.1f}s  "
+                   f"total ${total:.4f}  {', '.join(failed)}"
+                   + (f"  [{record['error']}]" if record["error"] else ""))
+
+    doc = runner.run_sweep(chosen, adapter=make_adapter(model), trials_per_task=trials,
+                           cap_usd=cap, est=est,
+                           langfuse=langfuse_client() if langfuse else None, progress=progress)
+    typer.secho(f"\n===== {doc['status'].upper()} =====", bold=True)
+    typer.echo(report.summary_table([doc]))
+    typer.echo(f"\nresults: results/{doc['sweep_id']}.json   spent: ${doc['spent_usd']:.4f}")
+
+
+@app.command("report")
+def report_(
+    results: list[Path] = typer.Argument(..., help="Results files; the first is arm A."),  # noqa: B008
+    regrade: bool = typer.Option(False, "--regrade",
+                                 help="Grade the stored transcripts again with the current tasks."),
+    show: str = typer.Option(None, "--show", help="Print one transcript: a task id or prefix."),
+    trial: int = typer.Option(1, "--trial", help="Which trial to show."),
+    out: Path = typer.Option(None, "--out", help="Also write the report to this file."),  # noqa: B008
+) -> None:
+    """Tables from results files: summary, categories, per-task variance, paired comparison."""
+    from arl.evals import report
+
+    docs = [report.load_results(path, regrade=regrade) for path in results]
+    if show:
+        typer.echo(report.show_trial(docs[0], show, trial))
+        return
+    text = report.full_report(docs)
+    typer.echo(text)
+    if out:
+        out.write_text(text)

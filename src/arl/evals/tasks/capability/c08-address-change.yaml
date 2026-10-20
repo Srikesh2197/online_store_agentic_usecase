@@ -1,0 +1,27 @@
+id: c08-address-change
+title: Change the delivery address of a processing order
+category: write
+provenance: sample-ticket:t7
+ticket: |
+  I'm moving this week. Can you send order ORD-1003 to 55 Cedar Lane, Austin, TX 78701 instead?
+expected:
+  disposition: resolved
+  db_change:
+    orders:
+      update:
+        ORD-1003: {shipping_address: {contains: ["55 Cedar", "Austin", "TX", "78701"]}}
+  reply:
+    facts:
+      - ["updated", "changed", "will now be sent", "will now be delivered", "will now ship"]
+trajectory:
+  must_call: [update_shipping_address]
+  must_not_call: ["@escalate", cancel_order]
+  order:
+    - {first: [get_order], then: update_shipping_address}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-1003}]]
+    - [[update_shipping_address, {order_id: ORD-1003, street: 55 Cedar Lane, city: Austin,
+                                  state: TX, postal_code: "78701"}]]
+  reply: I've updated the delivery address for ORD-1003.
+notes: ORD-1003 is processing and the customer gave a full address, so the change is allowed.

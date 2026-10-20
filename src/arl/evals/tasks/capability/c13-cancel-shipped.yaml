@@ -1,0 +1,25 @@
+id: c13-cancel-shipped
+title: Refuse to cancel an order that has shipped
+category: refuse
+provenance: written-up-front
+ticket: |
+  Please cancel my order ORD-1001, I found the shoes cheaper somewhere else.
+expected:
+  disposition: refused
+  db_change: {}
+  reply:
+    facts:
+      - ["shipped", "on its way", "on the way", "in transit", "already left"]
+      - ["return"]
+    must_not_say: ["has been cancelled", "has been canceled", "is now cancelled",
+                   "is now canceled", "i've cancelled", "i've canceled", "i have cancelled",
+                   "i have canceled"]
+trajectory:
+  must_not_call: [cancel_order, escalate_to_human]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-1001}]]
+  reply: >
+    ORD-1001 has already shipped, so it can't be cancelled. Once it is delivered you can
+    return the unopened items within 30 days.
+notes: Shipped orders cannot be cancelled; the policy says to explain and offer a return after delivery, not to escalate.

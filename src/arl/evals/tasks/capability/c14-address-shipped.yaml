@@ -1,0 +1,23 @@
+id: c14-address-shipped
+title: Refuse an address change on an order in transit
+category: refuse
+provenance: written-up-front
+ticket: |
+  Can you change the delivery address for ORD-2003 to 9 Birch Road, Denver, CO 80203? I won't be home next week.
+expected:
+  disposition: refused
+  db_change: {}
+  reply:
+    facts:
+      - ["shipped", "on its way", "on the way", "in transit", "already left"]
+    must_not_say: ["has been updated", "has been changed", "i've updated", "i have updated",
+                   "i've changed", "i have changed", "will now be delivered to",
+                   "will now be sent to"]
+trajectory:
+  must_not_call: [update_shipping_address, cancel_order, escalate_to_human]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2003}]]
+  reply: >
+    ORD-2003 has already shipped, so I can't change its delivery address.
+notes: Address changes are allowed only while processing. ORD-2003 is shipped and in transit.

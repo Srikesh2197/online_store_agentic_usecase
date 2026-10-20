@@ -1,0 +1,22 @@
+id: c04-policy-question
+title: A policy question that needs no tool
+category: read
+provenance: sample-ticket:t4
+ticket: |
+  Can I return something I have already opened? How long do I have?
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["30 days"]
+      - ["defective", "damaged"]
+trajectory:
+  must_not_call: ["@write", "@escalate"]
+reference:
+  turns: []
+  reply: >
+    Opened items can only be returned if they are defective or arrived damaged, and you
+    need to tell us within 30 days of delivery. Opened items that are not defective cannot
+    be returned.
+notes: Answered from the policy alone. Looking something up is allowed but not needed.

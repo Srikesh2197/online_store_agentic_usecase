@@ -1,0 +1,28 @@
+id: c15-opened-not-defective
+title: Refuse a refund for an opened item that works
+category: refuse
+provenance: written-up-front
+ticket: |
+  I opened the Bluetooth headphones from order ORD-2005 and I just don't like the sound. They work fine. Can I return them for a refund?
+expected:
+  disposition: refused
+  db_change: {}
+  reply:
+    facts:
+      - ["cannot be returned", "can't be returned", "can not be returned", "not returnable",
+         "not eligible", "isn't eligible", "aren't eligible", "can't accept", "cannot accept",
+         "unable to accept", "can't offer", "cannot offer", "unable to offer",
+         "can't process", "cannot process", "unable to process", "not able to",
+         "cannot authorise", "can't authorise", "cannot authorize", "can't authorize",
+         "does not allow", "doesn't allow"]
+    must_not_say: ["i've refunded", "i have refunded", "has been refunded", "refund has been issued",
+                   "return has been authorised", "return has been authorized",
+                   "i've authorised", "i've authorized"]
+trajectory:
+  must_not_call: [issue_refund, create_return, escalate_to_human]
+reference:
+  turns: []
+  reply: >
+    I'm sorry they aren't for you, but opened items that are not defective cannot be
+    returned under our policy.
+notes: The policy line "Opened items that are not defective cannot be returned" covers this, so it is a refusal, not a policy exception. Approved as refuse in the Phase 2 design.

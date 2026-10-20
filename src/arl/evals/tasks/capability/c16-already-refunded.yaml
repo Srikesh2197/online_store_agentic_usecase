@@ -1,0 +1,29 @@
+id: c16-already-refunded
+title: A refund request for an item that was already refunded
+category: refuse
+provenance: written-up-front
+ticket: |
+  The ceramic mug set from order ORD-1004 arrived chipped. Can I get a refund for it?
+expected:
+  disposition: refused
+  db_change: {}
+  reply:
+    facts:
+      - ["already"]
+      - ["24.00", "24 refund"]
+    must_not_say: ["i've refunded", "i have refunded", "i've issued", "i have issued",
+                   "i've processed", "i have processed"]
+trajectory:
+  must_call:
+    - {tool: get_order, args: {order_id: ORD-1004}}
+  must_not_call: [issue_refund, create_return, escalate_to_human]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-1004}]]
+  reply: >
+    The mug set was already refunded: $24.00 went back to your original payment method on
+    2026-08-24 (refund REF-9001).
+notes: >-
+  REF-9001 already refunded the mug set's full price, which is only visible in get_order. A second refund would exceed the price paid.
+  "already" is kept strict on purpose (Phase 2 review): a reply that says "Yes" and
+  "allow 5-7 business days" reads as a new refund on its way.

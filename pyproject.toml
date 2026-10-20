@@ -26,6 +26,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "arl.env" = ["policy.md"]
+"arl.evals" = ["tasks/*/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

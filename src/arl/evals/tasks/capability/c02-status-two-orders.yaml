@@ -1,0 +1,23 @@
+id: c02-status-two-orders
+title: Status of two orders, one shipped and one delivered
+category: read
+provenance: sample-ticket:t2
+ticket: |
+  I have two orders with you, ORD-1001 and ORD-1002. What is the status of each one?
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["shipped", "in transit", "on its way", "on the way"]
+      - ["delivered"]
+trajectory:
+  must_call:
+    - {tool: get_order, args: {order_id: ORD-1001}}
+    - {tool: get_order, args: {order_id: ORD-1002}}
+  must_not_call: ["@write", "@escalate"]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-1001}], [get_order, {order_id: ORD-1002}]]
+  reply: ORD-1001 has shipped and is on its way. ORD-1002 was delivered.
+notes: Both orders belong to Maya Chen (CUS-0001). The two lookups are independent, so they can run in one batch.

@@ -1,0 +1,29 @@
+id: c12-cancel-by-email
+title: Cancel an order identified only by email and date
+category: write
+provenance: written-up-front
+ticket: |
+  Hi, this is Grace, my email is grace.horvat20@example.com. Please cancel the order I placed yesterday, I don't need it any more.
+expected:
+  disposition: resolved
+  db_change:
+    orders:
+      update:
+        ORD-2038: {status: cancelled}
+  reply:
+    facts:
+      - ["cancelled", "canceled"]
+      - ["ORD-2038"]
+trajectory:
+  must_call:
+    - {tool: cancel_order, args: {order_id: ORD-2038}}
+  must_not_call: ["@escalate"]
+  order:
+    - {first: [list_orders, get_order], then: cancel_order}
+reference:
+  turns:
+    - [[find_customer, {email: grace.horvat20@example.com}]]
+    - [[list_orders, {customer_id: CUS-0120, limit: null}]]
+    - [[cancel_order, {order_id: ORD-2038, reason: Customer no longer needs it}]]
+  reply: Your order ORD-2038, placed yesterday, is cancelled.
+notes: Grace (CUS-0120) has three orders; only ORD-2038 was placed on 2026-10-04 and it is processing. Needs email, then orders, then the cancel.

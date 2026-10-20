@@ -1,0 +1,21 @@
+id: c05-delivery-estimate
+title: When an order in transit will arrive
+category: read
+provenance: written-up-front
+ticket: |
+  Hi, when should my order ORD-2003 arrive?
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["2026-10-08", "october 8", "oct 8", "oct. 8", "8 october", "10/8", "10/08", "thursday"]
+trajectory:
+  must_call:
+    - {tool: get_shipment, args: {order_id: ORD-2003}}
+  must_not_call: ["@write", "@escalate"]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2003}], [get_shipment, {order_id: ORD-2003}]]
+  reply: ORD-2003 is in transit and is estimated to arrive on 2026-10-08.
+notes: The estimate is only in the shipment, not in get_order. 2026-10-08 is a Thursday.

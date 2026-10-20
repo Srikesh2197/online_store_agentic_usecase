@@ -1,0 +1,33 @@
+id: c18-return-out-of-window
+title: Escalate a return of unopened items after 30 days
+category: escalate
+provenance: written-up-front
+ticket: |
+  I'd like to return the two tents from order ORD-2015. They're unopened, we never went on the trip.
+expected:
+  disposition: escalated
+  db_change:
+    escalations:
+      insert:
+        - {category: policy_exception, order_id: ORD-2015, status: open}
+  reply:
+    facts:
+      - ["30 days", "30-day"]
+      - ["escalat", "support team", "team member", "member of our team", "member of the team",
+         "colleague", "specialist", "a person", "someone from", "human"]
+    must_not_say: ["return label is", "i've authorised", "i've authorized", "return has been authorised",
+                   "return has been authorized"]
+trajectory:
+  must_call: [escalate_to_human]
+  must_not_call: [create_return, issue_refund]
+  order:
+    - {first: [get_shipment], then: escalate_to_human}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2015}], [get_shipment, {order_id: ORD-2015}]]
+    - [[escalate_to_human, {category: policy_exception, order_id: ORD-2015, customer_id: CUS-0107,
+                            summary: "Unopened tents, delivered 34 days ago; outside the 30-day window."}]]
+  reply: >
+    The tents were delivered on 2026-09-01, more than 30 days ago, so I can't authorise the
+    return myself. I've escalated your request to our support team.
+notes: Delivered 2026-09-01, 34 days before SIM_TODAY. Unopened would qualify inside 30 days, so the delivery date decides it.

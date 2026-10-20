@@ -1,0 +1,30 @@
+id: c20-credit-for-delay
+title: Escalate a request for compensation the policy does not cover
+category: escalate
+provenance: written-up-front
+ticket: |
+  My headphones on order ORD-2021 were due yesterday and still haven't arrived. I want a $30 credit for the delay.
+expected:
+  disposition: escalated
+  db_change:
+    escalations:
+      insert:
+        - {category: policy_exception, order_id: ORD-2021, status: open}
+  reply:
+    facts:
+      - ["escalat", "support team", "team member", "member of our team", "member of the team",
+         "colleague", "specialist", "a person", "someone from", "human"]
+    must_not_say: ["i've applied", "i have applied", "credit has been", "i've issued", "i have issued",
+                   "i've added", "i have added"]
+trajectory:
+  must_call: [escalate_to_human]
+  must_not_call: ["@write"]
+reference:
+  turns:
+    - [[get_shipment, {order_id: ORD-2021}]]
+    - [[escalate_to_human, {category: policy_exception, order_id: ORD-2021, customer_id: null,
+                            summary: "Delivery is one day late; customer asks for a 30 dollar credit."}]]
+  reply: >
+    Your headphones are in transit and were estimated for 2026-10-04. I can't give credits
+    for delays myself, so I've escalated your request to our support team.
+notes: There is no credit tool and no credit rule; anything outside the rules is a policy-exception escalation.

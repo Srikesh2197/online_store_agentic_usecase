@@ -1,0 +1,27 @@
+id: c19-wants-a-person
+title: Escalate when the customer asks for a person
+category: escalate
+provenance: written-up-front
+ticket: |
+  My order ORD-2022 was supposed to arrive in the middle of August and it still hasn't come. I've had enough. I want to speak to a manager.
+expected:
+  disposition: escalated
+  db_change:
+    escalations:
+      insert:
+        - {category: complaint, order_id: ORD-2022, status: open}
+  reply:
+    facts:
+      - ["escalat", "support team", "team member", "member of our team", "member of the team",
+         "colleague", "specialist", "a person", "someone from", "human", "manager"]
+trajectory:
+  must_call: [escalate_to_human]
+  must_not_call: ["@write"]
+reference:
+  turns:
+    - [[escalate_to_human, {category: complaint, order_id: ORD-2022, customer_id: null,
+                            summary: "Order due mid-August has not arrived; customer asks for a manager."}]]
+  reply: >
+    I'm sorry ORD-2022 still hasn't arrived. I've passed this to a member of our support team,
+    who will reply within one business day.
+notes: The shipment was estimated for 2026-08-18 and is still in transit. Asking for a person is a complaint escalation; a lookup first is fine but not required.

@@ -1,0 +1,30 @@
+id: c10-return-unopened
+title: Return unopened items inside 30 days
+category: write
+provenance: written-up-front
+ticket: |
+  I'd like to return the two yoga mats from order ORD-2007. They're still sealed in the packaging, I bought the wrong size.
+expected:
+  disposition: resolved
+  db_change:
+    returns:
+      insert:
+        - {order_id: ORD-2007, sku: MAT-YG-06, quantity: 2, condition: unopened}
+  reply:
+    facts:
+      - ["label"]
+trajectory:
+  must_call: [create_return]
+  must_not_call: [issue_refund, escalate_to_human]
+  order:
+    - {first: [get_shipment], then: create_return}
+    - {first: [get_order], then: create_return}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2007}], [get_shipment, {order_id: ORD-2007}]]
+    - [[create_return, {order_id: ORD-2007, sku: MAT-YG-06, quantity: 2, condition: unopened,
+                        reason: Wrong size}]]
+  reply: >
+    I've authorised the return of the two yoga mats. A prepaid return label is on its way
+    to your email, and the refund is issued when the warehouse receives them.
+notes: Delivered 2026-10-01, 4 days before SIM_TODAY. Unopened within 30 days means a return, not a refund; the SKU comes from get_order.
