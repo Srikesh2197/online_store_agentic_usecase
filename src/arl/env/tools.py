@@ -1,21 +1,31 @@
-"""The read tools, and the schemas that describe them to the model.
+"""The tools: five read, four write, one escalate. And the schemas that describe them.
 
 A tool has two halves:
 - the schema and description, which are all the model ever sees of it;
 - the Python function, which only our code runs.
 
-Tools never raise to the caller. A failed lookup returns {"error": ..., "message": ...},
-because the model can only react to what it reads in the result.
+Tools never raise to the caller. A failed call returns {"error": ..., "message": ...},
+because the model can only react to what it reads in the result. Each message says what
+went wrong and what to do instead.
+
+Write tools validate their own input: the shape of the arguments, that the records exist,
+and states the data cannot represent (cancelling a cancelled order, returning a SKU that
+is not in the order). They do not enforce the support policy (the 30-day window, refund
+limits, who may change an order). In this stage those rules are only in policy.md, for the
+model to follow.
 """
 
 import json
 import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from arl.env.seed import SIM_TODAY
 from arl.env.store import dollars
+from arl.llm.types import ToolSpec
 
 MAX_ORDERS = 20
 DEFAULT_ORDERS = 5
@@ -48,6 +58,57 @@ class ListOrdersArgs(_Args):
 
 class GetShipmentArgs(_Args):
     order_id: str = Field(description="The order ID the shipment belongs to, e.g. ORD-1001")
+
+
+class GetCustomerArgs(_Args):
+    customer_id: str = Field(description="The customer ID, e.g. CUS-0001")
+
+
+class IssueRefundArgs(_Args):
+    order_id: str = Field(description="The order ID to refund, e.g. ORD-1002")
+    amount_usd: str = Field(
+        pattern=r"^\d+\.\d{2}$",
+        description="The amount to refund in US dollars, with exactly two decimals, e.g. 79.99",
+    )
+    reason: str = Field(description="Why the refund is issued, in one sentence")
+
+
+class CancelOrderArgs(_Args):
+    order_id: str = Field(description="The order ID to cancel, e.g. ORD-1003")
+    reason: str = Field(description="Why the customer wants to cancel, in one sentence")
+
+
+class UpdateShippingAddressArgs(_Args):
+    order_id: str = Field(description="The order ID whose delivery address changes, e.g. ORD-1003")
+    street: str = Field(description="Street number and name, e.g. 55 Cedar Lane")
+    city: str = Field(description="City, e.g. Austin")
+    state: str = Field(pattern=r"^[A-Z]{2}$",
+                       description="Two-letter US state code in capitals, e.g. TX")
+    postal_code: str = Field(pattern=r"^\d{5}$", description="Five-digit US ZIP code, e.g. 78701")
+
+
+class CreateReturnArgs(_Args):
+    order_id: str = Field(description="The order ID the item came from, e.g. ORD-1002")
+    sku: str = Field(description="The SKU of the item being returned, from get_order")
+    quantity: int = Field(ge=1, description="How many of that item are being returned")
+    condition: Literal["unopened", "opened", "damaged"] = Field(
+        description="The item's condition as the customer describes it"
+    )
+    reason: str = Field(description="Why the customer is returning it, in one sentence")
+
+
+class EscalateArgs(_Args):
+    category: Literal["policy_exception", "cannot_verify", "complaint", "other"] = Field(
+        description="policy_exception: the request is outside the policy; cannot_verify: you "
+        "cannot confirm who the customer is or which order they mean; complaint: the customer "
+        "wants a person; other: anything else you cannot resolve with the tools"
+    )
+    summary: str = Field(
+        description="What the customer wants, what you found, and why you are escalating, "
+        "in two or three sentences, for the person who picks this up"
+    )
+    order_id: str | None = Field(default=None, description="The order ID concerned, or null")
+    customer_id: str | None = Field(default=None, description="The customer ID, or null")
 
 
 # --- Implementations ---------------------------------------------------------------
@@ -156,6 +217,179 @@ def get_shipment(conn: sqlite3.Connection, args: GetShipmentArgs) -> dict:
     return {"shipment": dict(row)}
 
 
+def get_customer(conn: sqlite3.Connection, args: GetCustomerArgs) -> dict:
+    customer_id = args.customer_id.strip().upper()
+    row = conn.execute(
+        "SELECT c.id, c.name, c.email, c.created_at AS member_since, COUNT(o.id) AS total_orders "
+        "FROM customers c LEFT JOIN orders o ON o.customer_id = c.id WHERE c.id = ? GROUP BY c.id",
+        (customer_id,),
+    ).fetchone()
+    if row is None:
+        return _error(
+            "customer_not_found",
+            f"No customer has the ID '{args.customer_id}'. Customer IDs look like CUS-0001; "
+            "use find_customer to get one from an email.",
+        )
+    return {"customer": dict(row)}
+
+
+# --- Write tools -------------------------------------------------------------------
+
+def _find_order(conn: sqlite3.Connection, order_id: str):
+    return conn.execute(
+        "SELECT id, customer_id, status, total_cents FROM orders WHERE id = ?",
+        (order_id.strip().upper(),),
+    ).fetchone()
+
+
+def _order_not_found(order_id: str) -> dict:
+    return _error(
+        "order_not_found",
+        f"No order has the ID '{order_id}'. Order IDs look like ORD-1001. Nothing was changed.",
+    )
+
+
+def _order_cancelled(order_id: str, action: str) -> dict:
+    return _error(
+        "order_cancelled",
+        f"Order {order_id} is cancelled, so it cannot {action}. Nothing was changed.",
+    )
+
+
+def _next_id(conn: sqlite3.Connection, table: str, prefix: str, first: int) -> str:
+    rows = conn.execute(f"SELECT id FROM {table}").fetchall()
+    numbers = [int(row["id"].split("-")[1]) for row in rows]
+    return f"{prefix}-{max(numbers, default=first - 1) + 1}"
+
+
+def issue_refund(conn: sqlite3.Connection, args: IssueRefundArgs) -> dict:
+    order = _find_order(conn, args.order_id)
+    if order is None:
+        return _order_not_found(args.order_id)
+    if order["status"] == "cancelled":
+        return _order_cancelled(order["id"], "be refunded")
+    cents = round(float(args.amount_usd) * 100)
+    if cents <= 0:
+        return _error("invalid_amount",
+                      f"The refund amount must be more than 0.00; got {args.amount_usd}.")
+    refund_id = _next_id(conn, "refunds", "REF", 9001)
+    conn.execute(
+        "INSERT INTO refunds VALUES (?, ?, ?, ?, 'issued', ?)",
+        (refund_id, order["id"], cents, args.reason, SIM_TODAY.isoformat()),
+    )
+    conn.commit()
+    refunded = conn.execute(
+        "SELECT COALESCE(SUM(amount_cents), 0) FROM refunds WHERE order_id = ?", (order["id"],)
+    ).fetchone()[0]
+    return {
+        "refund": {"id": refund_id, "order_id": order["id"], "amount_usd": dollars(cents),
+                   "reason": args.reason, "status": "issued",
+                   "created_at": SIM_TODAY.isoformat()},
+        "order_total_usd": dollars(order["total_cents"]),
+        "refunded_to_date_usd": dollars(refunded),
+        "note": "The refund goes to the original payment method and arrives in 5 to 7 "
+                "business days.",
+    }
+
+
+def cancel_order(conn: sqlite3.Connection, args: CancelOrderArgs) -> dict:
+    order = _find_order(conn, args.order_id)
+    if order is None:
+        return _order_not_found(args.order_id)
+    if order["status"] == "cancelled":
+        return _error("already_cancelled",
+                      f"Order {order['id']} is already cancelled. Nothing was changed.")
+    conn.execute("UPDATE orders SET status = 'cancelled', cancel_reason = ? WHERE id = ?",
+                 (args.reason, order["id"]))
+    conn.commit()
+    return {"order": {"id": order["id"], "status": "cancelled",
+                      "previous_status": order["status"]},
+            "note": "The order is cancelled."}
+
+
+def update_shipping_address(conn: sqlite3.Connection, args: UpdateShippingAddressArgs) -> dict:
+    order = _find_order(conn, args.order_id)
+    if order is None:
+        return _order_not_found(args.order_id)
+    if order["status"] == "cancelled":
+        return _order_cancelled(order["id"], "have its address changed")
+    address = f"{args.street.strip()}, {args.city.strip()}, {args.state} {args.postal_code}"
+    conn.execute("UPDATE orders SET shipping_address = ? WHERE id = ?", (address, order["id"]))
+    conn.commit()
+    # The new address is not echoed back: results go into the transcript and the logs.
+    return {"order": {"id": order["id"], "status": order["status"]},
+            "note": "The shipping address is updated."}
+
+
+def create_return(conn: sqlite3.Connection, args: CreateReturnArgs) -> dict:
+    order = _find_order(conn, args.order_id)
+    if order is None:
+        return _order_not_found(args.order_id)
+    if order["status"] == "cancelled":
+        return _order_cancelled(order["id"], "have a return")
+    sku = args.sku.strip().upper()
+    items = conn.execute(
+        "SELECT sku, quantity FROM items WHERE order_id = ? ORDER BY id", (order["id"],)
+    ).fetchall()
+    ordered = {item["sku"]: item["quantity"] for item in items}
+    if sku not in ordered:
+        return _error(
+            "sku_not_in_order",
+            f"Order {order['id']} has no item with SKU '{args.sku}'. Its SKUs are: "
+            f"{', '.join(ordered)}. Nothing was changed.",
+        )
+    already = conn.execute(
+        "SELECT COALESCE(SUM(quantity), 0) FROM returns WHERE order_id = ? AND sku = ?",
+        (order["id"], sku),
+    ).fetchone()[0]
+    if args.quantity > ordered[sku] - already:
+        return _error(
+            "quantity_too_high",
+            f"Order {order['id']} has {ordered[sku]} of {sku} and {already} already returned, "
+            f"so at most {ordered[sku] - already} can be returned; got {args.quantity}. "
+            "Nothing was changed.",
+        )
+    return_id = _next_id(conn, "returns", "RMA", 7001)
+    conn.execute(
+        "INSERT INTO returns VALUES (?, ?, ?, ?, ?, ?, 'authorized', ?)",
+        (return_id, order["id"], sku, args.quantity, args.condition, args.reason,
+         SIM_TODAY.isoformat()),
+    )
+    conn.commit()
+    return {
+        "return": {"id": return_id, "order_id": order["id"], "sku": sku,
+                   "quantity": args.quantity, "condition": args.condition,
+                   "status": "authorized"},
+        "note": "A prepaid return label is emailed to the customer. The warehouse issues the "
+                "refund when the item arrives; do not issue it yourself.",
+    }
+
+
+def escalate_to_human(conn: sqlite3.Connection, args: EscalateArgs) -> dict:
+    order_id = args.order_id.strip().upper() if args.order_id else None
+    customer_id = args.customer_id.strip().upper() if args.customer_id else None
+    if order_id and _find_order(conn, order_id) is None:
+        return _error("order_not_found",
+                      f"No order has the ID '{args.order_id}'. Pass null for order_id if you "
+                      "do not have a valid one. Nothing was escalated.")
+    if customer_id and conn.execute(
+        "SELECT 1 FROM customers WHERE id = ?", (customer_id,)
+    ).fetchone() is None:
+        return _error("customer_not_found",
+                      f"No customer has the ID '{args.customer_id}'. Pass null for customer_id "
+                      "if you do not have a valid one. Nothing was escalated.")
+    escalation_id = _next_id(conn, "escalations", "ESC", 3001)
+    conn.execute(
+        "INSERT INTO escalations VALUES (?, ?, ?, ?, ?, 'open', ?)",
+        (escalation_id, args.category, args.summary, order_id, customer_id,
+         SIM_TODAY.isoformat()),
+    )
+    conn.commit()
+    return {"escalation": {"id": escalation_id, "category": args.category, "status": "open"},
+            "note": "A member of the support team will reply to the customer within one "
+                    "business day."}
+
+
 # --- Registry ----------------------------------------------------------------------
 
 @dataclass(frozen=True)
@@ -164,6 +398,7 @@ class Tool:
     description: str
     args_model: type[BaseModel]
     fn: Callable[[sqlite3.Connection, BaseModel], dict]
+    kind: Literal["read", "write", "escalate"] = "read"
 
 
 TOOLS = [
@@ -178,8 +413,9 @@ TOOLS = [
     Tool(
         "get_order",
         "Get one order by its order ID: status, date placed, total, line items and any refunds. "
-        "Use this when you have an order ID. It does not return tracking details; use "
-        "get_shipment for those.",
+        "Use this when you have an order ID. It does not return tracking details or the "
+        "delivery date; for questions about where an order is or when it arrives, also call "
+        "get_shipment.",
         GetOrderArgs,
         get_order,
     ),
@@ -199,41 +435,114 @@ TOOLS = [
         GetShipmentArgs,
         get_shipment,
     ),
+    Tool(
+        "get_customer",
+        "Get a customer by customer ID: name, email, member-since date and number of orders. "
+        "Use this when you have a customer ID, for example the customer_id on an order, and "
+        "need to know whose it is. It does not return addresses or payment details. To look a "
+        "customer up by email, use find_customer instead.",
+        GetCustomerArgs,
+        get_customer,
+    ),
+    Tool(
+        "issue_refund",
+        "Refund money on an order to the original payment method. This changes the store and "
+        "cannot be undone. Use it only when the policy allows a refund, for the amount the "
+        "policy allows, after you have looked up the order. Do not use it for unopened items "
+        "that are being sent back: create a return for those instead.",
+        IssueRefundArgs,
+        issue_refund,
+        "write",
+    ),
+    Tool(
+        "cancel_order",
+        "Cancel an order. This changes the store and cannot be undone. Use it only when the "
+        "customer asks to cancel and the policy allows it; check the order status with "
+        "get_order first. Do not use it to stop a delivery that is already on its way.",
+        CancelOrderArgs,
+        cancel_order,
+        "write",
+    ),
+    Tool(
+        "update_shipping_address",
+        "Change the delivery address of an order. This changes the store. Use it only when the "
+        "customer gives a complete new address and the policy allows the change; check the "
+        "order status with get_order first. The address is not repeated in the result.",
+        UpdateShippingAddressArgs,
+        update_shipping_address,
+        "write",
+    ),
+    Tool(
+        "create_return",
+        "Authorise the return of an item from an order and email the customer a prepaid "
+        "label. This changes the store. Use it when the policy allows a return; get the SKU "
+        "from get_order. The refund for a returned item is issued by the warehouse when the "
+        "item arrives, so do not also call issue_refund for it.",
+        CreateReturnArgs,
+        create_return,
+        "write",
+    ),
+    Tool(
+        "escalate_to_human",
+        "Hand the ticket to a person on the support team. Use it when the request is outside "
+        "the policy, when you cannot confirm who the customer is or which order they mean, or "
+        "when the customer asks for a person. Tell the customer it has been escalated; do not "
+        "also take the action yourself.",
+        EscalateArgs,
+        escalate_to_human,
+        "escalate",
+    ),
 ]
 _BY_NAME = {tool.name: tool for tool in TOOLS}
 
 
 # --- Schemas -----------------------------------------------------------------------
 
-# Written by hand once, so the wire format is visible. The others are generated from
-# the Pydantic models; a test checks that generating this one gives the same result.
-FIND_CUSTOMER_SCHEMA = {
-    "type": "function",
-    "name": "find_customer",
-    "description": _BY_NAME["find_customer"].description,
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "email": {
-                "type": "string",
-                "description": "The customer's email address, e.g. maya.chen@example.com",
-            }
-        },
-        "required": ["email"],
-        "additionalProperties": False,
+# Written by hand once, so the schema is visible. The others are generated from the
+# Pydantic models; a test checks that generating this one gives the same result.
+FIND_CUSTOMER_PARAMETERS = {
+    "type": "object",
+    "properties": {
+        "email": {
+            "type": "string",
+            "description": "The customer's email address, e.g. maya.chen@example.com",
+        }
     },
-    "strict": True,
+    "required": ["email"],
+    "additionalProperties": False,
+}
+
+# Constraints Anthropic's strict mode rejects. They are moved into the description, so
+# the model still reads them, and Pydantic still enforces them when the tool runs.
+_CONSTRAINTS = {
+    "minimum": "at least {}",
+    "maximum": "at most {}",
+    "exclusiveMinimum": "more than {}",
+    "exclusiveMaximum": "less than {}",
+    "minLength": "at least {} characters",
+    "maxLength": "at most {} characters",
 }
 
 
-def _to_strict(schema: dict) -> dict:
-    """Reshape a Pydantic JSON schema into what OpenAI strict mode accepts.
+def _constraint_notes(schema: dict) -> list[str]:
+    notes = [text.format(schema[key]) for key, text in _CONSTRAINTS.items() if key in schema]
+    for sub in schema.get("anyOf", []):  # a nullable field keeps its constraints in a branch
+        notes += _constraint_notes(sub)
+    return notes
 
-    Strict mode requires every property to be listed in `required` (an optional field
-    is expressed as nullable instead) and `additionalProperties: false` on every object.
+
+def _to_strict(schema: dict) -> dict:
+    """Reshape a Pydantic JSON schema into what both providers' strict modes accept.
+
+    OpenAI requires every property to be listed in `required` (an optional field is
+    expressed as nullable instead) and `additionalProperties: false` on every object.
+    Anthropic accepts that too, but rejects numeric and length constraints.
     Pydantic's `title` and `default` annotations are dropped.
     """
-    out = {k: v for k, v in schema.items() if k not in ("title", "default")}
+    out = {k: v for k, v in schema.items() if k not in ("title", "default", *_CONSTRAINTS)}
+    notes = _constraint_notes(schema)
+    if notes and "description" in out:
+        out["description"] = f"{out['description'].rstrip('.')}. Must be {', '.join(notes)}."
     if "properties" in out:
         out["properties"] = {name: _to_strict(sub) for name, sub in out["properties"].items()}
         out["required"] = list(out["properties"])
@@ -245,20 +554,18 @@ def _to_strict(schema: dict) -> dict:
     return out
 
 
-def generate_schema(tool: Tool) -> dict:
-    return {
-        "type": "function",
-        "name": tool.name,
-        "description": tool.description,
-        "parameters": _to_strict(tool.args_model.model_json_schema()),
-        "strict": True,
-    }
+def strict_parameters(tool: Tool) -> dict:
+    return _to_strict(tool.args_model.model_json_schema())
 
 
-def tool_schemas() -> list[dict]:
-    """The `tools` array sent to the model."""
+def tool_specs() -> list[ToolSpec]:
+    """Every tool as the model sees it. Each provider adapter wraps these in its own shape."""
     return [
-        FIND_CUSTOMER_SCHEMA if tool.name == "find_customer" else generate_schema(tool)
+        ToolSpec(
+            tool.name,
+            tool.description,
+            FIND_CUSTOMER_PARAMETERS if tool.name == "find_customer" else strict_parameters(tool),
+        )
         for tool in TOOLS
     ]
 
@@ -275,9 +582,13 @@ def execute_tool(conn: sqlite3.Connection, name: str, arguments: str) -> dict:
     except json.JSONDecodeError as exc:
         return _error("invalid_arguments", f"The arguments are not valid JSON: {exc.msg}.")
     except ValidationError as exc:
+        fields = tool.args_model.model_fields
         problems = "; ".join(
             f"{'.'.join(str(p) for p in e['loc']) or 'arguments'}: {e['msg']}"
+            + (f" (expected: {fields[e['loc'][0]].description})"
+               if e["loc"] and e["loc"][0] in fields else "")
             for e in exc.errors()
         )
-        return _error("invalid_arguments", f"The arguments do not match the schema. {problems}")
+        return _error("invalid_arguments",
+                      f"The arguments do not match the schema. {problems}. Nothing was changed.")
     return tool.fn(conn, args)

@@ -62,7 +62,8 @@ _CITIES = ["Denver, CO 80202", "Seattle, WA 98101", "Chicago, IL 60601", "Miami,
 def _insert_order(conn, order_id, customer_id, status, placed_at, address, lines) -> None:
     total = sum(quantity * price for _, _, quantity, price in lines)
     conn.execute(
-        "INSERT INTO orders VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO orders (id, customer_id, status, placed_at, total_cents, shipping_address) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
         (order_id, customer_id, status, placed_at, total, address),
     )
     conn.executemany(

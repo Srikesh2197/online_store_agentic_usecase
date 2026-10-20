@@ -1,6 +1,7 @@
 import pytest
 
-from arl.tracing.cost import Price, Usage, cost_usd, load_models, price_for
+from arl.llm.pricing import Price, cost_usd, load_models, price_for
+from arl.llm.types import Usage
 
 PRICE = Price(input=0.10, cached_input=0.01, output=0.50)
 
@@ -37,3 +38,14 @@ def test_default_model_has_a_price():
 def test_unknown_model_is_an_error():
     with pytest.raises(KeyError):
         price_for("no-such-model")
+
+
+def test_cache_writes_are_billed_at_the_write_rate():
+    price = Price(input=0.10, cached_input=0.01, output=0.50, cache_write=0.125)
+    usage = Usage(input_tokens=1000, cached_input_tokens=600, cache_write_tokens=300)
+    assert cost_usd(usage, price) == pytest.approx((100 * 0.10 + 600 * 0.01 + 300 * 0.125) / 1e6)
+
+
+def test_without_a_write_price_cache_writes_cost_the_input_price():
+    usage = Usage(input_tokens=1000, cache_write_tokens=1000)
+    assert cost_usd(usage, PRICE) == pytest.approx(1000 * 0.10 / 1e6)

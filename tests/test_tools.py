@@ -91,7 +91,7 @@ def test_get_shipment_order_not_shipped(conn):
 
 # execute_tool: bad calls come back as results, never as exceptions
 def test_unknown_tool(conn):
-    assert execute_tool(conn, "issue_refund", "{}")["error"] == "unknown_tool"
+    assert execute_tool(conn, "delete_everything", "{}")["error"] == "unknown_tool"
 
 
 def test_arguments_not_json(conn):

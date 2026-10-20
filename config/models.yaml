@@ -1,6 +1,16 @@
-# Model ids and prices. Prices are US dollars per million tokens, standard tier,
-# read from https://developers.openai.com/api/docs/pricing on 2026-10-11.
-# Reasoning tokens are billed as output tokens.
+# Model ids, providers and prices. Prices are US dollars per million tokens, standard tier.
+# OpenAI: read from https://developers.openai.com/api/docs/pricing on 2026-10-11, and
+# cache-write prices added on 2026-10-18 (GPT-5.6 and later charge 1.25x input for them).
+# Anthropic: read from https://platform.claude.com/docs/en/about-claude/pricing on 2026-10-18.
+# Reasoning and thinking tokens are billed as output tokens.
+#
+# `default` is the config switch: the model decides the provider, so changing it moves
+# every `arl run` to that provider. `--model` overrides it for one run.
+#
+# `cache_write` is the price of writing input to the prompt cache. Absent means writing
+# costs the normal input price. OpenAI caches automatically; Anthropic only on request.
+# `request_options` are merged into every request for that model, after the adapter's own
+# fields, and are logged with the request.
 default: gpt-6-luna
 
 models:
@@ -8,14 +18,41 @@ models:
     provider: openai
     input: 0.10
     cached_input: 0.01
+    cache_write: 0.125
     output: 0.50
   gpt-5.6-luna:
     provider: openai
     input: 0.20
     cached_input: 0.02
+    cache_write: 0.25
     output: 1.20
   gpt-5-mini:
     provider: openai
     input: 0.25
     cached_input: 0.025
     output: 2.00
+
+  # Prices for prompts up to 100,000 tokens; longer prompts cost 5x (not reached here).
+  # Thinking is on by default; "summarized" returns readable thinking text instead of an
+  # empty block. Top-level cache_control asks Anthropic to cache the longest prefix it can
+  # (minimum 512 tokens on this model). 5-minute cache writes cost 1.25x input.
+  claude-haiku-5-5:
+    provider: anthropic
+    input: 0.10
+    cached_input: 0.01
+    cache_write: 0.125
+    output: 0.50
+    request_options:
+      thinking: {type: adaptive, display: summarized}
+      cache_control: {type: ephemeral}
+
+  # Legacy model, kept for reference runs only. No adaptive thinking; thinking is off unless
+  # requested. Its cache minimum is 4,096 tokens, so our prompts are not cached.
+  claude-haiku-4-5:
+    provider: anthropic
+    input: 1.00
+    cached_input: 0.10
+    cache_write: 1.25
+    output: 5.00
+    request_options:
+      cache_control: {type: ephemeral}

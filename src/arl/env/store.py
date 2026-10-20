@@ -20,7 +20,8 @@ CREATE TABLE orders (
                           ('processing', 'shipped', 'delivered', 'cancelled')),
     placed_at         TEXT NOT NULL,
     total_cents       INTEGER NOT NULL,
-    shipping_address  TEXT NOT NULL
+    shipping_address  TEXT NOT NULL,
+    cancel_reason     TEXT                  -- set by cancel_order
 );
 
 CREATE TABLE items (
@@ -51,6 +52,29 @@ CREATE TABLE refunds (
     reason        TEXT NOT NULL,
     status        TEXT NOT NULL CHECK (status IN ('pending', 'issued')),
     created_at    TEXT NOT NULL
+);
+
+CREATE TABLE returns (
+    id          TEXT PRIMARY KEY,           -- RMA-7001
+    order_id    TEXT NOT NULL REFERENCES orders(id),
+    sku         TEXT NOT NULL,
+    quantity    INTEGER NOT NULL,
+    condition   TEXT NOT NULL CHECK (condition IN ('unopened', 'opened', 'damaged')),
+    reason      TEXT NOT NULL,
+    status      TEXT NOT NULL CHECK (status IN ('authorized', 'received')),
+    created_at  TEXT NOT NULL
+);
+
+-- A handoff to a person. Kept in the database so an escalation is part of the end state.
+CREATE TABLE escalations (
+    id           TEXT PRIMARY KEY,          -- ESC-3001
+    category     TEXT NOT NULL CHECK (category IN
+                     ('policy_exception', 'cannot_verify', 'complaint', 'other')),
+    summary      TEXT NOT NULL,
+    order_id     TEXT REFERENCES orders(id),
+    customer_id  TEXT REFERENCES customers(id),
+    status       TEXT NOT NULL CHECK (status IN ('open', 'closed')),
+    created_at   TEXT NOT NULL
 );
 """
 

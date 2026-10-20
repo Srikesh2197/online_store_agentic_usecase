@@ -20,12 +20,16 @@ def main() -> None:
     load_dotenv(ROOT / ".env")
 
 
+# OpenAI's encrypted reasoning, and the signature on Anthropic's thinking blocks.
+_BLOB_KEYS = ("encrypted_content", "signature")
+
+
 def _shorten_blobs(value):
     """For display only: cut encrypted reasoning blobs down. The log keeps them whole."""
     if isinstance(value, dict):
         return {
             k: f"{v[:40]}... ({len(v)} chars, full value in the log)"
-            if k == "encrypted_content" and isinstance(v, str) and len(v) > 80
+            if k in _BLOB_KEYS and isinstance(v, str) and len(v) > 80
             else _shorten_blobs(v)
             for k, v in value.items()
         }
@@ -51,27 +55,28 @@ def _load_ticket(ticket: str) -> tuple[str, str]:
 @app.command()
 def run(
     ticket: str = typer.Option(..., "--ticket", "-t", help="Ticket id (e.g. t1) or a YAML path."),
-    model: str = typer.Option(None, "--model", "-m", help="Model id. Default: config/models.yaml."),
+    model: str = typer.Option(
+        None, "--model", "-m",
+        help="Model id; its provider comes from config/models.yaml. Default: `default` there.",
+    ),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Do not print raw requests/responses."),
 ) -> None:
     """Run one ticket through the single round and print what went over the wire."""
-    from openai import OpenAI
-
     from arl.env.seed import new_store
-    from arl.foundations.single_round import openai_sender, run_single_round
-    from arl.tracing.cost import load_models
+    from arl.foundations.single_round import run_single_round
+    from arl.llm import make_adapter
+    from arl.llm.pricing import load_models
     from arl.tracing.tracer import Tracer, langfuse_client, new_run_id
 
     ticket_id, text = _load_ticket(ticket)
-    model = model or load_models()["default"]
+    adapter = make_adapter(model or load_models()["default"])
     tracer = Tracer(new_run_id(ticket_id), langfuse=langfuse_client())
 
     result = run_single_round(
         text,
         ticket_id=ticket_id,
         conn=new_store(),
-        send=openai_sender(OpenAI()),
-        model=model,
+        adapter=adapter,
         tracer=tracer,
         echo=(lambda title, payload: None) if quiet else _echo,
     )
@@ -81,9 +86,11 @@ def run(
     typer.secho("\n===== SUMMARY =====", bold=True)
     u = result.usage
     typer.echo(
-        f"status: {result.status}   model: {model}   model calls: {result.model_calls}   "
-        f"tool calls: {result.tool_calls}\n"
-        f"tokens: {u.input_tokens} in ({u.cached_input_tokens} cached), "
+        f"status: {result.status}   stop: {result.stop}   "
+        f"model: {adapter.model} ({adapter.provider})\n"
+        f"model calls: {result.model_calls}   tool calls: {result.tool_calls}\n"
+        f"tokens: {u.input_tokens} in ({u.cached_input_tokens} cache read, "
+        f"{u.cache_write_tokens} cache write), "
         f"{u.output_tokens} out ({u.reasoning_tokens} reasoning)\n"
         f"cost: ${result.cost_usd:.6f}   latency: {result.latency_ms} ms\n"
         f"log: {tracer.path.relative_to(ROOT)}\n"

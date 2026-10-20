@@ -1,0 +1,772 @@
+{
+ "source_run": "20261018T151811Z-t1-dcb376",
+ "recorded_at": "2026-10-18T15:18:11.141+00:00",
+ "model": "claude-haiku-5-5",
+ "provider": "anthropic",
+ "ticket_id": "t1",
+ "ticket": "Hi, can you tell me the status of my order ORD-1001?",
+ "requests": [
+  {
+   "model": "claude-haiku-5-5",
+   "max_tokens": 2000,
+   "system": "You are a customer support assistant for Northwind Outfitters, an online store. Follow the policy below.\nToday's date is 2026-10-05.\n\n# Northwind Outfitters support policy\n\n## What you can do\n- Look up customers, orders and shipments with the tools provided.\n- Issue refunds, cancel orders, change delivery addresses and authorise returns, but only when the rules below allow it.\n- Escalate to a person when a request is outside these rules, when you cannot tell which order or customer is meant, or when the customer asks for a person. When you escalate, do not also take the action yourself.\n- Never say or imply that an action has been done unless a tool result confirms it. If you did not call the tool, say what will happen next instead.\n\n## Facts\n- Use only what the tools return. Never guess or invent an order status, a date, a tracking number or an amount.\n- If a lookup finds nothing, say so and ask the customer to check the detail they gave.\n- If you could not look something up, say what is missing instead of filling the gap.\n\n## Privacy\n- Order status and tracking may be shared with anyone who gives the order ID.\n- Do not share a shipping address or another customer's details.\n- Act on an order only when the customer has given its order ID, or the email address on the account it belongs to.\n\n## Cancellations and address changes\n- An order can be cancelled only while its status is `processing`.\n- A delivery address can be changed only while the order status is `processing`. The customer must give the full new address.\n- Once an order has shipped, neither is possible. Explain this, and for a cancellation offer a return after delivery.\n\n## Returns and refunds\n- The 30 days are counted from the delivery date in the shipment, not from the order date.\n- Unopened items can be returned within 30 days of delivery for a full refund. Authorise a return. The warehouse issues the refund when the item arrives, so do not issue it yourself.\n- Opened items that are defective or arrived damaged, reported within 30 days of delivery, are refunded straight away for the price of the affected items. The customer does not need to send them back.\n- Opened items that are not defective cannot be returned.\n- A refund is never more than the price paid for the items concerned.\n- Anything outside these rules, including a request after 30 days, is escalated as a policy exception.\n- Refunds go to the original payment method and take 5 to 7 business days.\n\n## Tone\n- Short, direct and polite. Answer the question asked.\n",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Hi, can you tell me the status of my order ORD-1001?"
+    }
+   ],
+   "tools": [
+    {
+     "name": "find_customer",
+     "description": "Find a customer by email address. Returns the customer's ID, name and email. Use this when the customer gives an email and you need their customer ID, for example before list_orders. Do not use it when you already have an order ID.",
+     "input_schema": {
+      "type": "object",
+      "properties": {
+       "email": {
+        "type": "string",
+        "description": "The customer's email address, e.g. maya.chen@example.com"
+       }
+      },
+      "required": [
+       "email"
+      ],
+      "additionalProperties": false
+     },
+     "strict": true
+    },
+    {
+     "name": "get_order",
+     "description": "Get one order by its order ID: status, date placed, total, line items and any refunds. Use this when you have an order ID. It does not return tracking details or the delivery date; for questions about where an order is or when it arrives, also call get_shipment.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID, e.g. ORD-1001",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "list_orders",
+     "description": "List a customer's orders, newest first, with status, date and total for each. Needs a customer ID, not an email. Use this when the customer has not given an order ID or asks about their orders in general. It does not return line items.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "customer_id": {
+        "description": "The customer ID returned by find_customer, e.g. CUS-0001. Not an email.",
+        "type": "string"
+       },
+       "limit": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "How many orders to return, newest first. Null means 5. The maximum is 20."
+       }
+      },
+      "required": [
+       "customer_id",
+       "limit"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "get_shipment",
+     "description": "Get the shipment for an order: carrier, tracking number, shipment status, ship date and estimated or actual delivery date. Use this for questions about where an order is or when it will arrive. An order that has not shipped has no shipment.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID the shipment belongs to, e.g. ORD-1001",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "get_customer",
+     "description": "Get a customer by customer ID: name, email, member-since date and number of orders. Use this when you have a customer ID, for example the customer_id on an order, and need to know whose it is. It does not return addresses or payment details. To look a customer up by email, use find_customer instead.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "customer_id": {
+        "description": "The customer ID, e.g. CUS-0001",
+        "type": "string"
+       }
+      },
+      "required": [
+       "customer_id"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "issue_refund",
+     "description": "Refund money on an order to the original payment method. This changes the store and cannot be undone. Use it only when the policy allows a refund, for the amount the policy allows, after you have looked up the order. Do not use it for unopened items that are being sent back: create a return for those instead.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID to refund, e.g. ORD-1002",
+        "type": "string"
+       },
+       "amount_usd": {
+        "description": "The amount to refund in US dollars, with exactly two decimals, e.g. 79.99",
+        "pattern": "^\\d+\\.\\d{2}$",
+        "type": "string"
+       },
+       "reason": {
+        "description": "Why the refund is issued, in one sentence",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id",
+       "amount_usd",
+       "reason"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "cancel_order",
+     "description": "Cancel an order. This changes the store and cannot be undone. Use it only when the customer asks to cancel and the policy allows it; check the order status with get_order first. Do not use it to stop a delivery that is already on its way.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID to cancel, e.g. ORD-1003",
+        "type": "string"
+       },
+       "reason": {
+        "description": "Why the customer wants to cancel, in one sentence",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id",
+       "reason"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "update_shipping_address",
+     "description": "Change the delivery address of an order. This changes the store. Use it only when the customer gives a complete new address and the policy allows the change; check the order status with get_order first. The address is not repeated in the result.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID whose delivery address changes, e.g. ORD-1003",
+        "type": "string"
+       },
+       "street": {
+        "description": "Street number and name, e.g. 55 Cedar Lane",
+        "type": "string"
+       },
+       "city": {
+        "description": "City, e.g. Austin",
+        "type": "string"
+       },
+       "state": {
+        "description": "Two-letter US state code in capitals, e.g. TX",
+        "pattern": "^[A-Z]{2}$",
+        "type": "string"
+       },
+       "postal_code": {
+        "description": "Five-digit US ZIP code, e.g. 78701",
+        "pattern": "^\\d{5}$",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id",
+       "street",
+       "city",
+       "state",
+       "postal_code"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "create_return",
+     "description": "Authorise the return of an item from an order and email the customer a prepaid label. This changes the store. Use it when the policy allows a return; get the SKU from get_order. The refund for a returned item is issued by the warehouse when the item arrives, so do not also call issue_refund for it.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID the item came from, e.g. ORD-1002",
+        "type": "string"
+       },
+       "sku": {
+        "description": "The SKU of the item being returned, from get_order",
+        "type": "string"
+       },
+       "quantity": {
+        "description": "How many of that item are being returned. Must be at least 1.",
+        "type": "integer"
+       },
+       "condition": {
+        "description": "The item's condition as the customer describes it",
+        "enum": [
+         "unopened",
+         "opened",
+         "damaged"
+        ],
+        "type": "string"
+       },
+       "reason": {
+        "description": "Why the customer is returning it, in one sentence",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id",
+       "sku",
+       "quantity",
+       "condition",
+       "reason"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "escalate_to_human",
+     "description": "Hand the ticket to a person on the support team. Use it when the request is outside the policy, when you cannot confirm who the customer is or which order they mean, or when the customer asks for a person. Tell the customer it has been escalated; do not also take the action yourself.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "category": {
+        "description": "policy_exception: the request is outside the policy; cannot_verify: you cannot confirm who the customer is or which order they mean; complaint: the customer wants a person; other: anything else you cannot resolve with the tools",
+        "enum": [
+         "policy_exception",
+         "cannot_verify",
+         "complaint",
+         "other"
+        ],
+        "type": "string"
+       },
+       "summary": {
+        "description": "What the customer wants, what you found, and why you are escalating, in two or three sentences, for the person who picks this up",
+        "type": "string"
+       },
+       "order_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "The order ID concerned, or null"
+       },
+       "customer_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "The customer ID, or null"
+       }
+      },
+      "required": [
+       "category",
+       "summary",
+       "order_id",
+       "customer_id"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    }
+   ],
+   "tool_choice": {
+    "type": "auto"
+   },
+   "thinking": {
+    "type": "adaptive",
+    "display": "summarized"
+   },
+   "cache_control": {
+    "type": "ephemeral"
+   }
+  },
+  {
+   "model": "claude-haiku-5-5",
+   "max_tokens": 2000,
+   "system": "You are a customer support assistant for Northwind Outfitters, an online store. Follow the policy below.\nToday's date is 2026-10-05.\n\n# Northwind Outfitters support policy\n\n## What you can do\n- Look up customers, orders and shipments with the tools provided.\n- Issue refunds, cancel orders, change delivery addresses and authorise returns, but only when the rules below allow it.\n- Escalate to a person when a request is outside these rules, when you cannot tell which order or customer is meant, or when the customer asks for a person. When you escalate, do not also take the action yourself.\n- Never say or imply that an action has been done unless a tool result confirms it. If you did not call the tool, say what will happen next instead.\n\n## Facts\n- Use only what the tools return. Never guess or invent an order status, a date, a tracking number or an amount.\n- If a lookup finds nothing, say so and ask the customer to check the detail they gave.\n- If you could not look something up, say what is missing instead of filling the gap.\n\n## Privacy\n- Order status and tracking may be shared with anyone who gives the order ID.\n- Do not share a shipping address or another customer's details.\n- Act on an order only when the customer has given its order ID, or the email address on the account it belongs to.\n\n## Cancellations and address changes\n- An order can be cancelled only while its status is `processing`.\n- A delivery address can be changed only while the order status is `processing`. The customer must give the full new address.\n- Once an order has shipped, neither is possible. Explain this, and for a cancellation offer a return after delivery.\n\n## Returns and refunds\n- The 30 days are counted from the delivery date in the shipment, not from the order date.\n- Unopened items can be returned within 30 days of delivery for a full refund. Authorise a return. The warehouse issues the refund when the item arrives, so do not issue it yourself.\n- Opened items that are defective or arrived damaged, reported within 30 days of delivery, are refunded straight away for the price of the affected items. The customer does not need to send them back.\n- Opened items that are not defective cannot be returned.\n- A refund is never more than the price paid for the items concerned.\n- Anything outside these rules, including a request after 30 days, is escalated as a policy exception.\n- Refunds go to the original payment method and take 5 to 7 business days.\n\n## Tone\n- Short, direct and polite. Answer the question asked.\n",
+   "messages": [
+    {
+     "role": "user",
+     "content": "Hi, can you tell me the status of my order ORD-1001?"
+    },
+    {
+     "role": "assistant",
+     "content": [
+      {
+       "type": "tool_use",
+       "id": "toolu_01Mp5RVjstzH5romQaiP2Y9u",
+       "name": "get_order",
+       "input": {
+        "order_id": "ORD-1001"
+       },
+       "caller": {
+        "type": "direct"
+       }
+      }
+     ]
+    },
+    {
+     "role": "user",
+     "content": [
+      {
+       "type": "tool_result",
+       "tool_use_id": "toolu_01Mp5RVjstzH5romQaiP2Y9u",
+       "content": "{\"order\": {\"id\": \"ORD-1001\", \"customer_id\": \"CUS-0001\", \"status\": \"shipped\", \"placed_at\": \"2026-09-28\", \"total_usd\": \"114.00\", \"items\": [{\"sku\": \"SHOE-TR-42\", \"name\": \"Trail running shoes\", \"quantity\": 1, \"unit_price_usd\": \"89.00\"}, {\"sku\": \"SOCK-WL-3P\", \"name\": \"Wool socks 3-pack\", \"quantity\": 2, \"unit_price_usd\": \"12.50\"}], \"refunds\": []}}"
+      },
+      {
+       "type": "text",
+       "text": "No more tools can be used for this ticket. Write your reply to the customer now, using only the results above. Do not write tool calls. If an action is still needed, do not say or imply that it has been done or is being done; say plainly what you could not do in this reply and what is still needed."
+      }
+     ]
+    }
+   ],
+   "tools": [
+    {
+     "name": "find_customer",
+     "description": "Find a customer by email address. Returns the customer's ID, name and email. Use this when the customer gives an email and you need their customer ID, for example before list_orders. Do not use it when you already have an order ID.",
+     "input_schema": {
+      "type": "object",
+      "properties": {
+       "email": {
+        "type": "string",
+        "description": "The customer's email address, e.g. maya.chen@example.com"
+       }
+      },
+      "required": [
+       "email"
+      ],
+      "additionalProperties": false
+     },
+     "strict": true
+    },
+    {
+     "name": "get_order",
+     "description": "Get one order by its order ID: status, date placed, total, line items and any refunds. Use this when you have an order ID. It does not return tracking details or the delivery date; for questions about where an order is or when it arrives, also call get_shipment.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID, e.g. ORD-1001",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "list_orders",
+     "description": "List a customer's orders, newest first, with status, date and total for each. Needs a customer ID, not an email. Use this when the customer has not given an order ID or asks about their orders in general. It does not return line items.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "customer_id": {
+        "description": "The customer ID returned by find_customer, e.g. CUS-0001. Not an email.",
+        "type": "string"
+       },
+       "limit": {
+        "anyOf": [
+         {
+          "type": "integer"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "How many orders to return, newest first. Null means 5. The maximum is 20."
+       }
+      },
+      "required": [
+       "customer_id",
+       "limit"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "get_shipment",
+     "description": "Get the shipment for an order: carrier, tracking number, shipment status, ship date and estimated or actual delivery date. Use this for questions about where an order is or when it will arrive. An order that has not shipped has no shipment.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID the shipment belongs to, e.g. ORD-1001",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "get_customer",
+     "description": "Get a customer by customer ID: name, email, member-since date and number of orders. Use this when you have a customer ID, for example the customer_id on an order, and need to know whose it is. It does not return addresses or payment details. To look a customer up by email, use find_customer instead.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "customer_id": {
+        "description": "The customer ID, e.g. CUS-0001",
+        "type": "string"
+       }
+      },
+      "required": [
+       "customer_id"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "issue_refund",
+     "description": "Refund money on an order to the original payment method. This changes the store and cannot be undone. Use it only when the policy allows a refund, for the amount the policy allows, after you have looked up the order. Do not use it for unopened items that are being sent back: create a return for those instead.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID to refund, e.g. ORD-1002",
+        "type": "string"
+       },
+       "amount_usd": {
+        "description": "The amount to refund in US dollars, with exactly two decimals, e.g. 79.99",
+        "pattern": "^\\d+\\.\\d{2}$",
+        "type": "string"
+       },
+       "reason": {
+        "description": "Why the refund is issued, in one sentence",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id",
+       "amount_usd",
+       "reason"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "cancel_order",
+     "description": "Cancel an order. This changes the store and cannot be undone. Use it only when the customer asks to cancel and the policy allows it; check the order status with get_order first. Do not use it to stop a delivery that is already on its way.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID to cancel, e.g. ORD-1003",
+        "type": "string"
+       },
+       "reason": {
+        "description": "Why the customer wants to cancel, in one sentence",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id",
+       "reason"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "update_shipping_address",
+     "description": "Change the delivery address of an order. This changes the store. Use it only when the customer gives a complete new address and the policy allows the change; check the order status with get_order first. The address is not repeated in the result.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID whose delivery address changes, e.g. ORD-1003",
+        "type": "string"
+       },
+       "street": {
+        "description": "Street number and name, e.g. 55 Cedar Lane",
+        "type": "string"
+       },
+       "city": {
+        "description": "City, e.g. Austin",
+        "type": "string"
+       },
+       "state": {
+        "description": "Two-letter US state code in capitals, e.g. TX",
+        "pattern": "^[A-Z]{2}$",
+        "type": "string"
+       },
+       "postal_code": {
+        "description": "Five-digit US ZIP code, e.g. 78701",
+        "pattern": "^\\d{5}$",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id",
+       "street",
+       "city",
+       "state",
+       "postal_code"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "create_return",
+     "description": "Authorise the return of an item from an order and email the customer a prepaid label. This changes the store. Use it when the policy allows a return; get the SKU from get_order. The refund for a returned item is issued by the warehouse when the item arrives, so do not also call issue_refund for it.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "order_id": {
+        "description": "The order ID the item came from, e.g. ORD-1002",
+        "type": "string"
+       },
+       "sku": {
+        "description": "The SKU of the item being returned, from get_order",
+        "type": "string"
+       },
+       "quantity": {
+        "description": "How many of that item are being returned. Must be at least 1.",
+        "type": "integer"
+       },
+       "condition": {
+        "description": "The item's condition as the customer describes it",
+        "enum": [
+         "unopened",
+         "opened",
+         "damaged"
+        ],
+        "type": "string"
+       },
+       "reason": {
+        "description": "Why the customer is returning it, in one sentence",
+        "type": "string"
+       }
+      },
+      "required": [
+       "order_id",
+       "sku",
+       "quantity",
+       "condition",
+       "reason"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    },
+    {
+     "name": "escalate_to_human",
+     "description": "Hand the ticket to a person on the support team. Use it when the request is outside the policy, when you cannot confirm who the customer is or which order they mean, or when the customer asks for a person. Tell the customer it has been escalated; do not also take the action yourself.",
+     "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+       "category": {
+        "description": "policy_exception: the request is outside the policy; cannot_verify: you cannot confirm who the customer is or which order they mean; complaint: the customer wants a person; other: anything else you cannot resolve with the tools",
+        "enum": [
+         "policy_exception",
+         "cannot_verify",
+         "complaint",
+         "other"
+        ],
+        "type": "string"
+       },
+       "summary": {
+        "description": "What the customer wants, what you found, and why you are escalating, in two or three sentences, for the person who picks this up",
+        "type": "string"
+       },
+       "order_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "The order ID concerned, or null"
+       },
+       "customer_id": {
+        "anyOf": [
+         {
+          "type": "string"
+         },
+         {
+          "type": "null"
+         }
+        ],
+        "description": "The customer ID, or null"
+       }
+      },
+      "required": [
+       "category",
+       "summary",
+       "order_id",
+       "customer_id"
+      ],
+      "type": "object"
+     },
+     "strict": true
+    }
+   ],
+   "tool_choice": {
+    "type": "none"
+   },
+   "thinking": {
+    "type": "adaptive",
+    "display": "summarized"
+   },
+   "cache_control": {
+    "type": "ephemeral"
+   }
+  }
+ ],
+ "responses": [
+  {
+   "model": "claude-haiku-5-5",
+   "id": "msg_011Cg9vejzxRc6WkbLkeGk6j",
+   "type": "message",
+   "role": "assistant",
+   "content": [
+    {
+     "type": "tool_use",
+     "id": "toolu_01Mp5RVjstzH5romQaiP2Y9u",
+     "name": "get_order",
+     "input": {
+      "order_id": "ORD-1001"
+     },
+     "caller": {
+      "type": "direct"
+     }
+    }
+   ],
+   "container": null,
+   "stop_reason": "tool_use",
+   "stop_sequence": null,
+   "stop_details": null,
+   "usage": {
+    "input_tokens": 4,
+    "cache_creation_input_tokens": 3677,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 3677,
+     "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 54,
+    "output_tokens_details": {
+     "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard"
+   },
+   "diagnostics": null
+  },
+  {
+   "model": "claude-haiku-5-5",
+   "id": "msg_011Cg9vepVani7iftSDA95oH",
+   "type": "message",
+   "role": "assistant",
+   "content": [
+    {
+     "type": "text",
+     "text": "Your order ORD-1001 has shipped. It was placed on 2026-09-28 and the total is $114.00. It includes 1 pair of Trail running shoes ($89.00) and 2 Wool socks 3-packs ($12.50 each).\n\nI can't see tracking or delivery details from this lookup, so I can't tell you when it will arrive. If you need that, please ask again and I'll check the shipment."
+    }
+   ],
+   "container": null,
+   "stop_reason": "end_turn",
+   "stop_sequence": null,
+   "stop_details": null,
+   "usage": {
+    "input_tokens": 4,
+    "cache_creation_input_tokens": 329,
+    "cache_read_input_tokens": 3677,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 329,
+     "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 135,
+    "output_tokens_details": {
+     "thinking_tokens": 0
+    },
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard"
+   },
+   "diagnostics": null
+  }
+ ],
+ "tool_calls": [
+  {
+   "call_id": "toolu_01Mp5RVjstzH5romQaiP2Y9u",
+   "name": "get_order",
+   "arguments": "{\"order_id\": \"ORD-1001\"}",
+   "result": {
+    "order": {
+     "id": "ORD-1001",
+     "customer_id": "CUS-0001",
+     "status": "shipped",
+     "placed_at": "2026-09-28",
+     "total_usd": "114.00",
+     "items": [
+      {
+       "sku": "SHOE-TR-42",
+       "name": "Trail running shoes",
+       "quantity": 1,
+       "unit_price_usd": "89.00"
+      },
+      {
+       "sku": "SOCK-WL-3P",
+       "name": "Wool socks 3-pack",
+       "quantity": 2,
+       "unit_price_usd": "12.50"
+      }
+     ],
+     "refunds": []
+    }
+   }
+  }
+ ]
+}

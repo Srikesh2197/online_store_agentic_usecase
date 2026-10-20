@@ -15,9 +15,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from arl import ROOT
-from arl.tracing.cost import Usage
+from arl.llm.types import Usage
 
 RUNS_DIR = ROOT / "runs"
+PHASE = "phase-1"
 
 
 def new_run_id(ticket_id: str) -> str:
@@ -67,8 +68,9 @@ class Tracer:
             f.write(json.dumps(line) + "\n")
 
     @contextmanager
-    def run(self, *, ticket_id: str, ticket: str, model: str, strategy: str):
-        self.event("run_start", ticket_id=ticket_id, ticket=ticket, model=model, strategy=strategy)
+    def run(self, *, ticket_id: str, ticket: str, model: str, provider: str, strategy: str):
+        self.event("run_start", ticket_id=ticket_id, ticket=ticket, model=model,
+                   provider=provider, strategy=strategy)
         with ExitStack() as stack:
             if self._lf:
                 from langfuse import propagate_attributes
@@ -81,8 +83,9 @@ class Tracer:
                 stack.enter_context(
                     propagate_attributes(
                         trace_name=f"{strategy}:{ticket_id}",
-                        tags=["phase-0", strategy],
-                        metadata={"run_id": self.run_id, "ticket_id": ticket_id},
+                        tags=[PHASE, strategy, provider, model],
+                        metadata={"run_id": self.run_id, "ticket_id": ticket_id,
+                                  "provider": provider},
                     )
                 )
                 self.trace_url = self._lf.get_trace_url()
@@ -94,23 +97,27 @@ class Tracer:
         if self._lf:
             self._lf.flush()
 
-    def end_run(self, *, status: str, reply: str, model_calls: int, tool_calls: int,
+    def end_run(self, *, status: str, reply: str, stop: str, model_calls: int, tool_calls: int,
                 usage: Usage, cost_usd: float, latency_ms: int) -> None:
         self.event(
-            "run_end", status=status, reply=reply, model_calls=model_calls, tool_calls=tool_calls,
-            usage=asdict(usage), cost_usd=cost_usd, latency_ms=latency_ms,
+            "run_end", status=status, reply=reply, stop=stop, model_calls=model_calls,
+            tool_calls=tool_calls, usage=asdict(usage), cost_usd=cost_usd, latency_ms=latency_ms,
         )
         if self._root:
             self._root.update(
                 output=reply,
-                metadata={"status": status, "model_calls": model_calls, "tool_calls": tool_calls,
-                          "cost_usd": cost_usd},
+                metadata={"status": status, "stop": stop, "model_calls": model_calls,
+                          "tool_calls": tool_calls, "cost_usd": cost_usd},
             )
 
     @contextmanager
-    def model_call(self, index: int, request: dict):
-        """Wrap one model request. Call `finish(response=, usage=, cost_usd=, request_id=)`."""
-        self.event("model_request", call_index=index, request=request)
+    def model_call(self, index: int, request: dict, *, provider: str):
+        """Wrap one model request.
+
+        Call `finish(response=, usage=, cost_usd=, request_id=, stop=, provider_stop=)`.
+        The request and response are logged as sent and received, whichever provider.
+        """
+        self.event("model_request", call_index=index, provider=provider, request=request)
         with ExitStack() as stack:
             generation = None
             if self._lf:
@@ -119,8 +126,10 @@ class Tracer:
                         name=f"model_call_{index}",
                         as_type="generation",
                         model=request["model"],
-                        input=request["input"],
-                        metadata={"tool_choice": str(request.get("tool_choice"))},
+                        # OpenAI calls the conversation `input`; Anthropic calls it `messages`.
+                        input=request.get("input", request.get("messages")),
+                        metadata={"provider": provider,
+                                  "tool_choice": str(request.get("tool_choice"))},
                     )
                 )
             record = _Record()
@@ -129,16 +138,22 @@ class Tracer:
             latency_ms = round((time.perf_counter() - start) * 1000)
             usage: Usage = record.fields["usage"]
             self.event(
-                "model_response", call_index=index, latency_ms=latency_ms,
-                request_id=record.fields.get("request_id"), usage=asdict(usage),
+                "model_response", call_index=index, provider=provider, latency_ms=latency_ms,
+                request_id=record.fields.get("request_id"), stop=record.fields.get("stop"),
+                provider_stop=record.fields.get("provider_stop"), usage=asdict(usage),
                 cost_usd=record.fields["cost_usd"], response=record.fields["response"],
             )
             if generation:
+                response = record.fields["response"]
                 generation.update(
-                    output=record.fields["response"].get("output"),
+                    # OpenAI returns `output` items; Anthropic returns `content` blocks.
+                    output=response.get("output", response.get("content")),
                     usage_details={
                         "input": usage.input_tokens,
+                        "input_cache_read": usage.cached_input_tokens,
+                        "input_cache_write": usage.cache_write_tokens,
                         "output": usage.output_tokens,
+                        "output_reasoning": usage.reasoning_tokens,
                         "total": usage.input_tokens + usage.output_tokens,
                     },
                     cost_details={"total": record.fields["cost_usd"]},

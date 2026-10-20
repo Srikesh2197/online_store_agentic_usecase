@@ -2,7 +2,7 @@
 
 ## Stage 0: First tool call — built 2026-10-12
 
-Branch `feature_0911_01`. Not committed. Write-up: [stages/00-first-tool-call.md](stages/00-first-tool-call.md).
+Branch `feature_0911_01`, committed as e35990c and merged to main. Write-up: [stages/00-first-tool-call.md](stages/00-first-tool-call.md).
 
 ### What was built
 
@@ -55,3 +55,74 @@ Five tickets, one run each: $0.00103 in total, 1.6 to 5.6 s per run. A one-line 
 - Returning reasoning items in a follow-up request is untested, because they only appeared in final responses. The loop in stage 3 will exercise it.
 - t3's reply was a misleading failure reported as `completed`. Stage 2's graders need to catch this kind of case.
 - t1's reply was correct but minimal. Decide in stage 1 whether tool descriptions should encourage fetching the shipment for status questions.
+
+## Stage 1: Two providers and the full toolset — built 2026-10-18
+
+Branch `feature_0918_01`. Not committed. Write-up: [stages/01-two-providers.md](stages/01-two-providers.md).
+
+### What was built
+
+| Path | Contents |
+|---|---|
+| `src/arl/llm/types.py` | Neutral types: `Text`, `ToolCall`, `Reasoning`, `ToolResult`, `Message`, `ToolSpec`, `ModelResponse`, `Usage` (now with `cache_write_tokens`), the `Adapter` protocol |
+| `src/arl/llm/openai_adapter.py`, `anthropic_adapter.py` | Request building, response parsing, stop and usage mapping, raw-body senders |
+| `src/arl/llm/pricing.py` | Price table from `config/models.yaml` (moved from the deleted `tracing/cost.py`); cache-write prices |
+| `src/arl/llm/__init__.py` | `make_adapter(model)`: the model's `provider` in config picks the adapter |
+| `src/arl/foundations/single_round.py` | Provider-neutral; request 2 ends with `CLOSING_INSTRUCTION` |
+| `src/arl/env/tools.py` | 10 tools: 5 read, 4 write, 1 escalate (`Tool.kind`). `tool_specs()` is neutral |
+| `src/arl/env/store.py` | New tables `returns` and `escalations`; `orders.cancel_reason` |
+| `src/arl/env/policy.md` | Rewritten: the agent may act within the rules, and must escalate otherwise |
+| `config/models.yaml` | `claude-haiku-5-5` and `claude-haiku-4-5`, with `request_options` (thinking display, cache_control) |
+| `tickets/t6.yaml` to `t8.yaml` | Cancel, address change, out-of-window refund |
+| `tests/fixtures/recorded/` and `scripts/record_fixture.py` | Real t1 bodies from both providers, and the script that records them |
+| `tests/` | 103 tests, no API calls |
+
+### Decisions made
+
+- The secondary model is `claude-haiku-5-5`, at $0.10 / $0.01 cached / $0.125 cache write / $0.50 per million tokens. `claude-haiku-4-5` stays in config, unused: it is legacy and costs 10×.
+- **The config switch:** `default:` in `models.yaml`, or `--model`. The provider follows from the model.
+- Assistant turns are replayed with their native items to the same provider. Another provider's reasoning is dropped.
+- Unknown response item types raise `ValueError`.
+- Neutral call arguments are a JSON string.
+- Policy rules live only in the prompt. Write tools validate shape, existence and impossible states (cancelled, wrong SKU, over-quantity), not policy.
+- Anthropic-unsupported schema constraints are moved into descriptions, and Pydantic still enforces them.
+- Request 2 ends with a closing user instruction as well as `tool_choice: none`.
+- Haiku thinking runs with `display: summarized`, so traces show the reasoning.
+
+### Environment facts
+
+- `anthropic` 1.13.0: `with_raw_response...text()` is a method (in `openai` it is a property). The request-id header is `request-id`.
+- gpt-6-luna reports `input_tokens_details.cache_write_tokens` and bills cache writes at 1.25× input. The minimum cacheable prompt is 1,024 tokens on GPT-5.6 and later.
+- Haiku 5.5's minimum cacheable prompt is 512 tokens. Its cache TTL is 5 minutes, so a cache is written again after a pause.
+- Langfuse generations carry `input_cache_read`, `input_cache_write`, `output_reasoning` and `provider`. Read them back with `api.observations.get_many(type="GENERATION", fields="core,basic,usage,model,metadata")`.
+
+### Measured in stage 1
+
+One run per ticket per variant.
+- **Run A** (t1–t8, both providers): OpenAI $0.0012, Haiku $0.0067.
+- **Run B** (closing instruction, t3 and t5–t8): OpenAI $0.0009, Haiku $0.0039.
+- **Total Phase 1 spend:** about $0.014.
+
+A request with ten tools is about 1,830 input tokens on OpenAI and 3,680 on Haiku.
+
+### What stage 2 needs to know
+
+- **Single-round results will be poor on any ticket that needs a write.** Neither model called a write tool in request 1 on any ticket; both look first. Expect t6–t8-style tasks to fail at rung 1. That is the baseline, not a bug.
+- **Grade the replies for false claims of action.** Without the closing instruction, Haiku claimed actions it never took (t7, t8). OpenAI's misleading "try again later" (t3) persists. Both are reply-quality failures that the outcome check alone (database diff) will not catch, so the reply-facts check matters.
+- **The database end state now covers every disposition.** Refunds, cancellations, address changes, returns and escalations each leave rows, and an escalation is a row in `escalations`. `new_store()` still gives a fresh copy per trial.
+- **Budget per trial:**
+  - gpt-6-luna: about $0.0001–0.0003;
+  - Haiku 5.5: about $0.0006–0.0009 as configured;
+  - a Haiku run that degenerates to `max_tokens` costs about $0.0016.
+
+  The cost cap should use `max_tokens` × the output price as the worst case.
+- **Haiku caching across tasks:** top-level `cache_control` writes a new entry for every distinct ticket. An explicit breakpoint on the system prompt and tools should make a sweep cheaper. That is untested.
+- **Stop reasons are logged per call** (`stop`, `provider_stop`). A grader or report can count `max_tokens` endings directly.
+- `tests/test_recorded.py` pins the exact request bodies. Any intended change to the request shape needs `scripts/record_fixture.py` on new runs.
+
+### Open questions carried forward
+
+- Does an explicit cache breakpoint on the tools cut Haiku's per-task cost to near OpenAI's?
+- How reliable is the closing instruction over many trials? It was tested once on 5 tickets.
+- Haiku's broken output under `tool_choice: none` is undocumented. Does it recur in the Stage 3 loop when a step cap forces a final answer?
+- Should the Stage 3 loop drop the closing instruction, since the model is no longer cut off? Or keep it for the step-cap exit?

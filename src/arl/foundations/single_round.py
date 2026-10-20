@@ -1,4 +1,4 @@
-"""Ladder rung 1: a single round of tool use, against the OpenAI Responses API.
+"""Ladder rung 1: a single round of tool use, against either provider.
 
     request 1  ->  the model answers, or asks for tools
     run tools  ->  our code runs them (the model cannot)
@@ -6,8 +6,9 @@
 
 There is no loop. Whatever the model did not ask for in request 1, it never gets.
 
-Requests are built as plain dicts and responses are read as plain dicts, so what is
-printed and logged is the JSON that went over the wire.
+The conversation is held as neutral `Message`s. The adapter turns it into the
+provider's request body, and that body is what is printed and logged, so what you
+see is the JSON that went over the wire.
 """
 
 import json
@@ -18,15 +19,24 @@ from dataclasses import dataclass
 from importlib import resources
 
 from arl.env.seed import SIM_TODAY
-from arl.env.tools import execute_tool, tool_schemas
-from arl.tracing.cost import Usage, cost_usd, price_for
+from arl.env.tools import execute_tool, tool_specs
+from arl.llm.pricing import cost_usd, price_for
+from arl.llm.types import Adapter, Message, ModelResponse, Text, ToolChoice, ToolResult, Usage
 from arl.tracing.tracer import Tracer
 
 STRATEGY = "single_round"
 MAX_OUTPUT_TOKENS = 2000
 
-# send(request) -> (response body, provider request id)
-Send = Callable[[dict], tuple[dict, str | None]]
+# Sent after the tool results in request 2. With tool_choice "none" the model cannot act
+# any more, but it may still want to; in Phase 1 Haiku 5.5 then wrote tool calls as text or
+# claimed actions it had not taken. This tells it the round is over and how to end honestly.
+CLOSING_INSTRUCTION = (
+    "No more tools can be used for this ticket. Write your reply to the customer now, using "
+    "only the results above. Do not write tool calls. If an action is still needed, do not say "
+    "or imply that it has been done or is being done; say plainly what you could not do in "
+    "this reply and what is still needed."
+)
+
 Echo = Callable[[str, object], None]
 
 
@@ -34,6 +44,7 @@ Echo = Callable[[str, object], None]
 class RunResult:
     status: str        # "completed", or "no_reply" if the run ended without reply text
     reply: str
+    stop: str          # the neutral stop reason of the last response
     model_calls: int
     tool_calls: int
     usage: Usage
@@ -50,109 +61,65 @@ def build_instructions() -> str:
     )
 
 
-def openai_sender(client) -> Send:
-    """Send a request with the OpenAI SDK and return the response body as received."""
-
-    def send(request: dict) -> tuple[dict, str | None]:
-        raw = client.responses.with_raw_response.create(**request)
-        return json.loads(raw.text), raw.headers.get("x-request-id")
-
-    return send
-
-
-def usage_from_openai(body: dict) -> Usage:
-    usage = body.get("usage") or {}
-    return Usage(
-        input_tokens=usage.get("input_tokens", 0),
-        cached_input_tokens=(usage.get("input_tokens_details") or {}).get("cached_tokens", 0),
-        output_tokens=usage.get("output_tokens", 0),
-        reasoning_tokens=(usage.get("output_tokens_details") or {}).get("reasoning_tokens", 0),
-    )
-
-
-def output_text(body: dict) -> str:
-    """The reply text: every `output_text` part of every `message` item."""
-    return "".join(
-        part["text"]
-        for item in body.get("output", [])
-        if item["type"] == "message"
-        for part in item["content"]
-        if part["type"] == "output_text"
-    )
-
-
 def run_single_round(
     ticket: str,
     *,
     ticket_id: str,
     conn: sqlite3.Connection,
-    send: Send,
-    model: str,
+    adapter: Adapter,
     tracer: Tracer,
     echo: Echo = lambda title, payload: None,
 ) -> RunResult:
-    price = price_for(model)
+    price = price_for(adapter.model)
+    system, tools = build_instructions(), tool_specs()
     usage, cost, model_calls = Usage(), 0.0, 0
     started = time.perf_counter()
 
-    def call_model(request: dict) -> dict:
+    def call_model(messages: list[Message], tool_choice: ToolChoice) -> ModelResponse:
         nonlocal usage, cost, model_calls
         model_calls += 1
-        echo(f"REQUEST {model_calls}", request)
-        with tracer.model_call(model_calls, request) as record:
-            body, request_id = send(request)
-            call_usage = usage_from_openai(body)
-            call_cost = cost_usd(call_usage, price)
-            record.finish(response=body, usage=call_usage, cost_usd=call_cost,
-                          request_id=request_id)
-        usage, cost = usage + call_usage, cost + call_cost
-        echo(f"RESPONSE {model_calls}", body)
-        return body
+        request = adapter.build_request(system=system, messages=messages, tools=tools,
+                                        tool_choice=tool_choice, max_tokens=MAX_OUTPUT_TOKENS)
+        echo(f"REQUEST {model_calls} ({adapter.provider})", request)
+        with tracer.model_call(model_calls, request, provider=adapter.provider) as record:
+            body, request_id = adapter.send(request)
+            response = adapter.parse_response(body)
+            call_cost = cost_usd(response.usage, price)
+            record.finish(response=body, usage=response.usage, cost_usd=call_cost,
+                          request_id=request_id, stop=response.stop,
+                          provider_stop=response.provider_stop)
+        usage, cost = usage + response.usage, cost + call_cost
+        echo(f"RESPONSE {model_calls} (stop: {response.stop} / {response.provider_stop})", body)
+        return response
 
-    with tracer.run(ticket_id=ticket_id, ticket=ticket, model=model, strategy=STRATEGY):
-        request = {
-            "model": model,
-            "instructions": build_instructions(),
-            "input": [{"role": "user", "content": ticket}],
-            "tools": tool_schemas(),
-            "tool_choice": "auto",
-            "parallel_tool_calls": True,
-            "max_output_tokens": MAX_OUTPUT_TOKENS,
-            # Stateless: OpenAI keeps nothing, so request 2 must carry the whole conversation.
-            "store": False,
-            # Reasoning items come back encrypted so they can be returned in request 2.
-            "include": ["reasoning.encrypted_content"],
-        }
-        body = call_model(request)
-        calls = [item for item in body["output"] if item["type"] == "function_call"]
+    with tracer.run(ticket_id=ticket_id, ticket=ticket, model=adapter.model,
+                    provider=adapter.provider, strategy=STRATEGY):
+        messages = [Message("user", [Text(ticket)])]
+        response = call_model(messages, "auto")
+        calls = response.tool_calls
 
         if calls:
             results = []
             for call in calls:
                 with tracer.tool_call(
-                    call_id=call["call_id"], name=call["name"], arguments=call["arguments"]
+                    call_id=call.id, name=call.name, arguments=call.arguments
                 ) as record:
-                    result = execute_tool(conn, call["name"], call["arguments"])
+                    result = execute_tool(conn, call.name, call.arguments)
                     record.finish(result=result)
-                echo(f"TOOL {call['name']}({call['arguments']})", result)
-                results.append({
-                    "type": "function_call_output",
-                    "call_id": call["call_id"],
-                    "output": json.dumps(result),
-                })
-            # The model's own output items go back verbatim, followed by one result per call.
-            # tool_choice "none" forbids further calls, so this response must be the reply.
-            request = {
-                **request,
-                "input": request["input"] + body["output"] + results,
-                "tool_choice": "none",
-            }
-            body = call_model(request)
+                echo(f"TOOL {call.name}({call.arguments})", result)
+                results.append(ToolResult(call.id, json.dumps(result), is_error="error" in result))
+            # The model's own turn goes back verbatim, then one result per call and the
+            # closing instruction. tool_choice "none" forbids further calls, so this response
+            # must be the reply.
+            messages = messages + [response.message(),
+                                   Message("user", [*results, Text(CLOSING_INSTRUCTION)])]
+            response = call_model(messages, "none")
 
-        reply = output_text(body)
+        reply = response.text
         result = RunResult(
             status="completed" if reply else "no_reply",
             reply=reply,
+            stop=response.stop,
             model_calls=model_calls,
             tool_calls=len(calls),
             usage=usage,
@@ -160,7 +127,7 @@ def run_single_round(
             latency_ms=round((time.perf_counter() - started) * 1000),
         )
         tracer.end_run(
-            status=result.status, reply=reply, model_calls=model_calls, tool_calls=len(calls),
-            usage=usage, cost_usd=cost, latency_ms=result.latency_ms,
+            status=result.status, reply=reply, stop=result.stop, model_calls=model_calls,
+            tool_calls=len(calls), usage=usage, cost_usd=cost, latency_ms=result.latency_ms,
         )
     return result

@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 # Versions are pinned in requirements/; these are the direct imports of sub-project 1.
 dependencies = [
     "openai>=3.26,<4",
+    "anthropic>=1.13,<2",
     "pydantic>=2.13,<3",
     "langfuse>=4.17,<5",
     "typer>=0.27,<1",
