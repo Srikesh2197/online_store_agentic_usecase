@@ -31,6 +31,15 @@ models:
     input: 0.25
     cached_input: 0.025
     output: 2.00
+  # Reference model for Stage 3 (10 tasks, once). Prices read on 2026-10-20 from the pricing
+  # page; prompts over 272K tokens cost more (not reached here). A reasoning model: default
+  # effort medium, and it cannot go below low. Cached reads are 0.05x input on this model.
+  gpt-6.1-sol:
+    provider: openai
+    input: 2.00
+    cached_input: 0.10
+    cache_write: 2.50
+    output: 10.00
 
   # Prices for prompts up to 100,000 tokens; longer prompts cost 5x (not reached here).
   # Thinking is on by default; "summarized" returns readable thinking text instead of an

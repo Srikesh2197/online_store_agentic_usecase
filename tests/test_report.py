@@ -68,3 +68,33 @@ def test_paired_table_counts_wins_losses_and_ties():
     assert "A better on 2 tasks, B better on 1, tied on 1" in text
     assert "a direction, not a finding" in text
     assert "p = 1.000" in text and "at least 6 differing tasks" in text
+
+
+def test_paired_table_matches_k_when_the_arms_differ():
+    # On t1, 4/5 against 1/1 used to count as a win for the single trial. Compared on the
+    # first trial of each task, both passed t1 (a tie); only t2 differs.
+    a = _doc({"t1": [True, False, True, True, True], "t2": [False] * 5}, model="A")
+    b = _doc({"t1": [True], "t2": [True]}, model="B", k=1)
+    text = paired_table(a, b)
+    assert "A better on 0 tasks, B better on 1, tied on 1" in text
+    assert "compared on its first 1 trial(s) only" in text
+    same = paired_table(a, a)
+    assert "first" not in same
+
+
+def test_restrict_keeps_only_the_named_tasks():
+    from arl.evals.report import full_report, restrict
+
+    doc = _doc({"c07-cancel": [True], "c08-address": [False], "c13-shipped": [True]})
+    kept = restrict(doc, ["c07", "c13-shipped"])
+    assert kept["task_ids"] == ["c07-cancel", "c13-shipped"]
+    assert {t["task_id"] for t in kept["trials"]} == {"c07-cancel", "c13-shipped"}
+    assert summary(kept)["success"] == 1.0
+    assert full_report([kept]).startswith("_Restricted to 2 tasks")
+
+
+def test_summary_counts_runs_that_ended_without_a_reply():
+    doc = _doc({"a": [True, False, False]})
+    for trial, status in zip(doc["trials"], ["completed", "step_cap", "truncated"]):
+        trial["transcript"] = {"status": status}
+    assert summary(doc)["exits"] == {"step_cap": 1, "truncated": 1}

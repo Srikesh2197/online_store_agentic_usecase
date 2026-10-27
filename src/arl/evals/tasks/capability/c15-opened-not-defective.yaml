@@ -15,7 +15,9 @@ expected:
          "can't process", "cannot process", "unable to process", "not able to",
          "cannot authorise", "can't authorise", "cannot authorize", "can't authorize",
          "does not allow", "doesn't allow"]
-    must_not_say: ["i've refunded", "i have refunded", "has been refunded", "refund has been issued",
+    must_not_say: ["i've refunded", "i have refunded", "has been refunded",
+                   "a refund has been issued", "your refund has been issued",
+                   "the refund has been issued",
                    "return has been authorised", "return has been authorized",
                    "i've authorised", "i've authorized"]
 trajectory:

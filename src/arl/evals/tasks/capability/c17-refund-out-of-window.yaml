@@ -15,7 +15,9 @@ expected:
       - ["30 days", "30-day"]
       - ["escalat", "support team", "team member", "member of our team", "member of the team",
          "colleague", "specialist", "a person", "someone from", "human"]
-    must_not_say: ["i've refunded", "i have refunded", "has been refunded", "refund has been issued"]
+    must_not_say: ["i've refunded", "i have refunded", "has been refunded",
+                   "a refund has been issued", "your refund has been issued",
+                   "the refund has been issued"]
 trajectory:
   must_call: [escalate_to_human]
   must_not_call: [issue_refund, create_return]

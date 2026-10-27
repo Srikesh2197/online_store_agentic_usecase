@@ -5,14 +5,16 @@
     cap        before each trial, stop if the worst case of that trial could cross the cap
     record     one results JSON per sweep and one ledger row, written even on a halt
 
-The agent under test is `run_single_round`, unchanged. The runner only gives it a fresh
-store and a tracer, and afterwards records what the store looks like.
+The agent under test is a strategy: rung 1 (`single_round`) or rung 2 (`hand_loop`), each
+unchanged. The runner only gives it a fresh store and a tracer, and afterwards records what
+the store looks like.
 """
 
 import csv
 import json
 import statistics
 import subprocess
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,9 +26,9 @@ from arl.evals.dbdiff import diff, snapshot
 from arl.evals.graders import grade
 from arl.evals.tasks import DEFAULT_SET, Task, task_set_hash
 from arl.evals.transcript import Transcript
+from arl.foundations.hand_loop import MAX_STEPS, run_hand_loop
 from arl.foundations.single_round import (
     MAX_OUTPUT_TOKENS,
-    STRATEGY,
     build_instructions,
     run_single_round,
 )
@@ -37,16 +39,29 @@ from arl.tracing.tracer import RUNS_DIR, Tracer, read_events
 RESULTS_DIR = ROOT / "results"
 LEDGER_NAME = "spend.csv"
 EVAL_RUNS_DIR = RUNS_DIR / "eval"
-PHASE = "phase-2"
-PHASE_BUDGET_USD = 1.50
+PHASE = "phase-3"
+PHASE_BUDGET_USD = 1.00
 
-CALLS_PER_TRIAL = 2              # the single round: request 1, then request 2 if tools ran
+
+@dataclass(frozen=True)
+class Strategy:
+    name: str
+    run: Callable
+    max_calls: int     # model calls a trial can make at most: the basis of the worst case
+    prior_calls: int   # model calls a trial is expected to make, until one has been measured
+
+
+STRATEGIES = {
+    "single_round": Strategy("single_round", run_single_round, max_calls=2, prior_calls=2),
+    "hand_loop": Strategy("hand_loop", run_hand_loop, max_calls=MAX_STEPS, prior_calls=4),
+}
+DEFAULT_STRATEGY = "single_round"
 # Request characters per input token, measured from the recorded t1 bodies in
 # tests/fixtures/recorded/ (OpenAI 10,515 chars = 1,834 tokens; Anthropic 10,351 = 3,681,
 # which includes its hidden tool prompt). A test keeps these in line with the fixtures.
 CHARS_PER_TOKEN = {"openai": 5.7, "anthropic": 2.8}
 PRIOR_OUTPUT_TOKENS_PER_CALL = 400   # until a sweep of the model has been measured
-WORST_TOOL_RESULT_TOKENS = 600       # what request 2 adds at most for tool results
+WORST_TOOL_RESULT_TOKENS = 600       # what one batch of tool results adds at most
 MAX_CONSECUTIVE_ERRORS = 3
 MAX_LANGFUSE_TRACES = 30
 
@@ -67,6 +82,7 @@ class Estimate:
     per_trial_expected: float
     per_trial_worst: float
     basis: str                    # where per_trial_expected comes from
+    strategy: str = DEFAULT_STRATEGY
 
     @property
     def expected_usd(self) -> float:
@@ -98,7 +114,7 @@ def request_chars(model: str, ticket: str) -> int:
 
 
 def measured_trial_costs(model: str, results_dir: Path = RESULTS_DIR,
-                         strategy: str = STRATEGY) -> list[float]:
+                         strategy: str = DEFAULT_STRATEGY) -> list[float]:
     costs = []
     for path in sorted(Path(results_dir).glob("*.json")):
         doc = json.loads(path.read_text())
@@ -107,25 +123,38 @@ def measured_trial_costs(model: str, results_dir: Path = RESULTS_DIR,
     return costs
 
 
+def worst_trial_cost(tokens: float, input_price: float, output_price: float,
+                     max_calls: int) -> float:
+    """Every call at the output limit, nothing cached. Each call after the first carries the
+    history so far: one more batch of tool results and one more full output per step."""
+    return sum(
+        (tokens + (i - 1) * (WORST_TOOL_RESULT_TOKENS + MAX_OUTPUT_TOKENS)) * input_price
+        + MAX_OUTPUT_TOKENS * output_price
+        for i in range(1, max_calls + 1)
+    ) / 1e6
+
+
 def estimate(tasks: list[Task], model: str, trials_per_task: int,
-             results_dir: Path = RESULTS_DIR) -> Estimate:
+             results_dir: Path = RESULTS_DIR, strategy: str = DEFAULT_STRATEGY) -> Estimate:
+    plan = STRATEGIES[strategy]
     provider = model_entry(model)["provider"]
     price = price_for(model)
     tokens = statistics.mean(request_chars(model, t.ticket) / CHARS_PER_TOKEN[provider]
                              for t in tasks)
     input_price = max(price.input, price.cache_write or 0.0)   # no cache discount assumed
-    worst = CALLS_PER_TRIAL * ((tokens + WORST_TOOL_RESULT_TOKENS) * input_price
-                               + MAX_OUTPUT_TOKENS * price.output) / 1e6
-    measured = measured_trial_costs(model, results_dir)
+    worst = worst_trial_cost(tokens, input_price, price.output, plan.max_calls)
+    measured = measured_trial_costs(model, results_dir, strategy)
     if measured:
         expected = statistics.mean(measured)
-        basis = f"measured: mean of {len(measured)} earlier trials of {model}"
+        basis = f"measured: mean of {len(measured)} earlier {strategy} trials of {model}"
     else:
-        expected = CALLS_PER_TRIAL * (tokens * input_price
-                                      + PRIOR_OUTPUT_TOKENS_PER_CALL * price.output) / 1e6
-        basis = (f"prior: {round(tokens)} input tokens per call from the request size, "
-                 f"{PRIOR_OUTPUT_TOKENS_PER_CALL} output tokens per call, no cache")
-    return Estimate(model, len(tasks) * trials_per_task, round(tokens), expected, worst, basis)
+        expected = plan.prior_calls * (tokens * input_price
+                                       + PRIOR_OUTPUT_TOKENS_PER_CALL * price.output) / 1e6
+        basis = (f"prior: {plan.prior_calls} calls, {round(tokens)} input tokens per call from "
+                 f"the request size, {PRIOR_OUTPUT_TOKENS_PER_CALL} output tokens per call, "
+                 "no cache")
+    return Estimate(model, len(tasks) * trials_per_task, round(tokens), expected, worst, basis,
+                    strategy)
 
 
 # --- Ledger --------------------------------------------------------------------------
@@ -181,15 +210,15 @@ def _baseline() -> dict:
 
 
 def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
-              langfuse=None) -> dict:
+              langfuse=None, strategy: str = DEFAULT_STRATEGY) -> dict:
     """One attempt at one task. API failures become an error trial; Ctrl-C propagates."""
     run_id = f"{sweep_id}-{task.id}-k{trial}"
     tracer = Tracer(run_id, log_dir=Path(runs_dir) / sweep_id, langfuse=langfuse, phase=PHASE)
     conn = new_store()
     error = None
     try:
-        run_single_round(task.ticket.strip(), ticket_id=task.id, conn=conn, adapter=adapter,
-                         tracer=tracer)
+        STRATEGIES[strategy].run(task.ticket.strip(), ticket_id=task.id, conn=conn,
+                                 adapter=adapter, tracer=tracer)
     except Exception as exc:  # noqa: BLE001 -- an API or harness failure, not a wrong answer
         error = f"{type(exc).__name__}: {exc}"
     finally:
@@ -199,7 +228,7 @@ def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
     if any(e["type"] == "run_start" for e in events):
         transcript = Transcript.from_events(events)
     else:  # failed before the run started, so only the end state was logged
-        transcript = Transcript(task.id, task.ticket, adapter.model, STRATEGY,
+        transcript = Transcript(task.id, task.ticket, adapter.model, strategy,
                                 db_diff=events[-1]["db_diff"])
     if error and not transcript.error:
         transcript = replace(transcript, error=error)
@@ -227,7 +256,7 @@ def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
 
 # --- Sweep ---------------------------------------------------------------------------
 
-def new_sweep_id(model: str, trials: int, strategy: str = STRATEGY) -> str:
+def new_sweep_id(model: str, trials: int, strategy: str = DEFAULT_STRATEGY) -> str:
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return f"{stamp}-{strategy}-{model}-k{trials}"
 
@@ -235,14 +264,16 @@ def new_sweep_id(model: str, trials: int, strategy: str = STRATEGY) -> str:
 def run_sweep(tasks: list[Task], *, adapter, trials_per_task: int, cap_usd: float,
               est: Estimate, task_set: str = DEFAULT_SET, results_dir: Path = RESULTS_DIR,
               runs_dir: Path = EVAL_RUNS_DIR, langfuse=None, sweep_id: str | None = None,
-              progress=lambda record, spent: None) -> dict:
+              progress=lambda record, spent: None, strategy: str = DEFAULT_STRATEGY) -> dict:
     """Run every task `trials_per_task` times, task-major, and record the results.
 
     Before each trial, if what has been spent plus that trial's worst case would cross
     `cap_usd`, the sweep halts. Spend is read from the model calls actually logged, so a
     trial that crashed after one call still counts.
     """
-    sweep_id = sweep_id or new_sweep_id(adapter.model, trials_per_task)
+    if strategy not in STRATEGIES:
+        raise ValueError(f"Unknown strategy '{strategy}'. Known: {', '.join(STRATEGIES)}")
+    sweep_id = sweep_id or new_sweep_id(adapter.model, trials_per_task, strategy)
     results_dir = Path(results_dir)
     results_dir.mkdir(parents=True, exist_ok=True)
     started = datetime.now(UTC).isoformat(timespec="seconds")
@@ -256,7 +287,7 @@ def run_sweep(tasks: list[Task], *, adapter, trials_per_task: int, cap_usd: floa
                 break
             mirror = langfuse if langfuse is not None and len(records) < MAX_LANGFUSE_TRACES else None
             record = run_trial(task, k, adapter=adapter, sweep_id=sweep_id, runs_dir=runs_dir,
-                               langfuse=mirror)
+                               langfuse=mirror, strategy=strategy)
             records.append(record)
             spent += record["cost_usd"]
             progress(record, spent)
@@ -272,7 +303,8 @@ def run_sweep(tasks: list[Task], *, adapter, trials_per_task: int, cap_usd: floa
         doc = {
             "sweep_id": sweep_id,
             "phase": PHASE,
-            "strategy": STRATEGY,
+            "strategy": strategy,
+            "max_model_calls": STRATEGIES[strategy].max_calls,
             "model": adapter.model,
             "provider": adapter.provider,
             "task_set": task_set,
@@ -296,7 +328,7 @@ def run_sweep(tasks: list[Task], *, adapter, trials_per_task: int, cap_usd: floa
         results_file.write_text(json.dumps(doc, indent=1) + "\n")
         append_ledger({
             "ts_utc": doc["finished_at"], "sweep_id": sweep_id, "phase": PHASE,
-            "strategy": STRATEGY, "model": adapter.model, "task_set": task_set,
+            "strategy": strategy, "model": adapter.model, "task_set": task_set,
             "tasks": len(tasks), "trials_per_task": trials_per_task,
             "trials_planned": len(plan), "trials_run": len(records),
             "est_usd": f"{est.expected_usd:.6f}", "worst_usd": f"{est.worst_usd:.6f}",

@@ -37,6 +37,28 @@ def load_results(path: Path, regrade: bool = False) -> dict:
     return doc
 
 
+def _matches(task_id: str, wanted: str) -> bool:
+    return task_id == wanted or task_id.startswith(wanted + "-")
+
+
+def restrict(doc: dict, wanted: list[str]) -> dict:
+    """The same results, keeping only the tasks named (by id or prefix such as c07)."""
+    keep = [t for t in doc["task_ids"] if any(_matches(t, w.strip()) for w in wanted)]
+    return {**doc, "task_ids": keep, "trials": [t for t in doc["trials"] if t["task_id"] in keep],
+            "restricted_to": keep}
+
+
+def first_trials(doc: dict, k: int) -> dict:
+    """The same results, keeping only the first k trials of each task."""
+    seen: Counter = Counter()
+    kept = []
+    for trial in doc["trials"]:
+        seen[trial["task_id"]] += 1
+        if seen[trial["task_id"]] <= k:
+            kept.append(trial)
+    return {**doc, "trials": kept, "trials_per_task": min(k, doc["trials_per_task"])}
+
+
 def arm_name(doc: dict) -> str:
     return f"{doc['model']} · {doc['strategy']} · k{doc['trials_per_task']}"
 
@@ -118,6 +140,10 @@ def summary(doc: dict) -> dict:
         "p95": _percentile([t["latency_ms"] for t in runs if t["latency_ms"]], 0.95) / 1000
                if any(t["latency_ms"] for t in runs) else None,
         "max_tokens": sum(t["max_tokens_endings"] for t in runs),
+        # How runs ended, other than with a reply: step_cap, truncated, refused, no_reply...
+        "exits": Counter(status for t in runs
+                         if (status := (t.get("transcript") or {}).get("status"))
+                         not in (None, "completed")),
         "errors": sum(1 for t in runs if t["error"]),
         "status": doc["status"],
     }
@@ -135,7 +161,7 @@ def summary_table(docs: list[dict]) -> str:
     header = ["arm", "trials", "success", "pass^1", "pass^k", "tasks always / flaky / never",
               "db ✓", "facts ✓", "hygiene ✓", "trajectory ✓", "model calls/run",
               "tokens in/run", "tokens out/run", "$/run", "$ total", "latency p50 / p95 s",
-              "max_tokens endings", "errors", "status"]
+              "max_tokens endings", "other exits", "errors", "status"]
     rows = []
     for doc in docs:
         s = summary(doc)
@@ -146,7 +172,9 @@ def summary_table(docs: list[dict]) -> str:
             f"{s['calls']:.2f}", f"{s['tokens_in']:.0f}", f"{s['tokens_out']:.0f}",
             f"{s['cost']:.6f}", f"{s['cost_total']:.4f}",
             f"{s['p50']:.1f} / {s['p95']:.1f}" if s["p50"] is not None else "–",
-            s["max_tokens"], s["errors"], s["status"],
+            s["max_tokens"],
+            ", ".join(f"{name} {n}" for name, n in sorted(s["exits"].items())) or "–",
+            s["errors"], s["status"],
         ])
     return _table(header, rows)
 
@@ -182,7 +210,17 @@ def variance_table(doc: dict) -> str:
 
 
 def paired_table(a: dict, b: dict) -> str:
-    """Arm A against arm B, task by task, on the per-task success rate."""
+    """Arm A against arm B, task by task, on the per-task success rate.
+
+    Arms with different trials per task are compared on the first min(k) trials of each
+    task, so 4/5 against 1/1 is not counted as a win for the single trial.
+    """
+    matched = ""
+    if a["trials_per_task"] != b["trials_per_task"]:
+        k = min(a["trials_per_task"], b["trials_per_task"])
+        matched = (f" The arms ran k={a['trials_per_task']} and k={b['trials_per_task']}, so "
+                   f"each task is compared on its first {k} trial(s) only.")
+        a, b = first_trials(a, k), first_trials(b, k)
     ta, tb = per_task(a), per_task(b)
     categories = {t["task_id"]: t["category"] for t in a["trials"] + b["trials"]}
     rows, wins, losses, ties = [], 0, 0, 0
@@ -206,7 +244,7 @@ def paired_table(a: dict, b: dict) -> str:
         f"A sign test reaches p < {SIGNIFICANCE} only when at least {m} differing tasks all go "
         f"one way, so on {len(rows)} tasks a difference of less than about "
         f"{100 * m / max(len(rows), 1):.0f} points ({m} of {len(rows)} tasks) "
-        "cannot be told from noise."
+        "cannot be told from noise." + matched
     )
     return _table(["task", "category", "A", "B", "better"], rows) + "\n" + footer
 
@@ -218,6 +256,10 @@ def full_report(docs: list[dict]) -> str:
         parts.append(f"_Re-graded from the stored transcripts against task set "
                      f"{regraded[0]['regraded_with']} (recorded with "
                      f"{', '.join(sorted({d['task_set_hash'] for d in regraded}))})._")
+    restricted = [d for d in docs if d.get("restricted_to") is not None]
+    if restricted:
+        parts.append(f"_Restricted to {len(restricted[0]['restricted_to'])} tasks: "
+                     f"{', '.join(restricted[0]['restricted_to'])}._")
     parts += ["## Summary", summary_table(docs), "## Success by category", category_table(docs)]
     for doc in docs:
         if doc["trials_per_task"] > 1:

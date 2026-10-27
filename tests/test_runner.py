@@ -158,3 +158,75 @@ def test_dry_run_prints_the_estimate_and_calls_no_model(monkeypatch):
     result = CliRunner().invoke(cli.app, ["eval", "--dry-run", "--tasks", "c01", "-k", "2"])
     assert result.exit_code == 0, result.output
     assert "1 tasks × 2 trials" in result.output and "worst:" in result.output
+
+
+# --- Strategies (Stage 3) --------------------------------------------------------------
+
+class LoopingModel:
+    """Looks up the order, cancels it, then replies: three calls, the shape of a loop run."""
+
+    def __init__(self):
+        from scripted import ScriptedModel, calls, reply
+
+        self.calls = 0
+        self._script = ScriptedModel(
+            "openai",
+            calls(("get_order", {"order_id": "ORD-1003"})),
+            calls(("cancel_order", {"order_id": "ORD-1003", "reason": "Wrong lamp"})),
+            reply("Your order ORD-1003 is cancelled."),
+        )
+
+    def __call__(self, request):
+        self.calls += 1
+        return self._script(request)
+
+
+def test_sweep_runs_the_loop_strategy_and_records_it(tmp_path):
+    model = LoopingModel()
+    doc = run_sweep(select(load_tasks(), "c07"), adapter=OpenAIAdapter("gpt-6-luna", send=model),
+                    trials_per_task=1, cap_usd=1.0, est=_estimate(0.05, 1),
+                    results_dir=tmp_path / "results", runs_dir=tmp_path / "runs",
+                    sweep_id="loop-sweep", strategy="hand_loop")
+    assert doc["strategy"] == "hand_loop" and doc["max_model_calls"] == runner.MAX_STEPS
+    [trial] = doc["trials"]
+    assert trial["success"] is True, trial["verdict"]
+    assert (trial["model_calls"], trial["tool_calls"]) == (3, 2)
+    assert trial["transcript"]["strategy"] == "hand_loop"
+    [row] = runner.read_ledger(tmp_path / "results")
+    assert row["strategy"] == "hand_loop"
+    with pytest.raises(ValueError):
+        run_sweep(TASKS, adapter=OpenAIAdapter("gpt-6-luna", send=model), trials_per_task=1,
+                  cap_usd=1.0, est=_estimate(0.05, 1), results_dir=tmp_path / "results",
+                  runs_dir=tmp_path / "runs", strategy="no_such_strategy")
+
+
+def test_the_loop_worst_case_uses_the_step_cap(tmp_path):
+    one = estimate(TASKS, "gpt-6-luna", 1, results_dir=tmp_path)
+    loop = estimate(TASKS, "gpt-6-luna", 1, results_dir=tmp_path, strategy="hand_loop")
+    assert loop.strategy == "hand_loop" and "4 calls" in loop.basis
+    assert loop.per_trial_worst > 5 * one.per_trial_worst
+    assert loop.per_trial_worst == pytest.approx(runner.worst_trial_cost(
+        loop.input_tokens_per_call, 0.125, 0.50, runner.MAX_STEPS), rel=0.01)
+    assert loop.per_trial_expected == pytest.approx(2 * one.per_trial_expected)
+
+
+def test_measured_costs_are_kept_apart_by_strategy(tmp_path):
+    _sweep(tmp_path, trials=2, cap=1.0, worst=0.001)   # a single_round sweep
+    results = tmp_path / "results"
+    assert estimate(TASKS, "gpt-6-luna", 1, results).basis.startswith("measured")
+    assert estimate(TASKS, "gpt-6-luna", 1, results, strategy="hand_loop").basis.startswith("prior")
+
+
+def test_dry_run_of_the_loop_shows_its_worst_case(monkeypatch):
+    from arl import cli
+
+    def no_adapter(model):
+        raise AssertionError("a dry run must not build an adapter")
+
+    monkeypatch.setattr("arl.llm.make_adapter", no_adapter)
+    result = CliRunner().invoke(cli.app, ["eval", "--dry-run", "--tasks", "c01", "-k", "1",
+                                          "--strategy", "hand_loop"])
+    assert result.exit_code == 0, result.output
+    assert "hand_loop" in result.output and f"{runner.MAX_STEPS} calls" in result.output
+    bad = CliRunner().invoke(cli.app, ["eval", "--dry-run", "--strategy", "nope"])
+    assert bad.exit_code != 0

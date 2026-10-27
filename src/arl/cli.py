@@ -43,6 +43,18 @@ def _echo(title: str, payload: object) -> None:
     typer.echo(json.dumps(_shorten_blobs(payload), indent=2))
 
 
+STRATEGY_HELP = "single_round (rung 1) or hand_loop (rung 2)."
+
+
+def _strategy(name: str):
+    from arl.evals.runner import STRATEGIES
+
+    if name not in STRATEGIES:
+        raise typer.BadParameter(f"Unknown strategy '{name}'. Known: {', '.join(STRATEGIES)}",
+                                 param_hint="--strategy")
+    return STRATEGIES[name]
+
+
 def _load_ticket(ticket: str) -> tuple[str, str]:
     path = Path(ticket) if ticket.endswith(".yaml") else TICKETS_DIR / f"{ticket}.yaml"
     if not path.exists():
@@ -60,19 +72,20 @@ def run(
         help="Model id; its provider comes from config/models.yaml. Default: `default` there.",
     ),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Do not print raw requests/responses."),
+    strategy: str = typer.Option("single_round", "--strategy", "-s", help=STRATEGY_HELP),
 ) -> None:
-    """Run one ticket through the single round and print what went over the wire."""
+    """Run one ticket through a strategy and print what went over the wire."""
     from arl.env.seed import new_store
-    from arl.foundations.single_round import run_single_round
     from arl.llm import make_adapter
     from arl.llm.pricing import load_models
     from arl.tracing.tracer import Tracer, langfuse_client, new_run_id
 
+    plan = _strategy(strategy)
     ticket_id, text = _load_ticket(ticket)
     adapter = make_adapter(model or load_models()["default"])
     tracer = Tracer(new_run_id(ticket_id), langfuse=langfuse_client())
 
-    result = run_single_round(
+    result = plan.run(
         text,
         ticket_id=ticket_id,
         conn=new_store(),
@@ -86,7 +99,7 @@ def run(
     typer.secho("\n===== SUMMARY =====", bold=True)
     u = result.usage
     typer.echo(
-        f"status: {result.status}   stop: {result.stop}   "
+        f"strategy: {plan.name}   status: {result.status}   stop: {result.stop}   "
         f"model: {adapter.model} ({adapter.provider})\n"
         f"model calls: {result.model_calls}   tool calls: {result.tool_calls}\n"
         f"tokens: {u.input_tokens} in ({u.cached_input_tokens} cache read, "
@@ -110,27 +123,29 @@ def eval_(
     yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask before spending."),
     langfuse: bool = typer.Option(False, "--langfuse",
                                   help="Mirror up to 30 trials of this sweep to Langfuse."),
+    strategy: str = typer.Option("single_round", "--strategy", "-s", help=STRATEGY_HELP),
 ) -> None:
-    """Run the task set through the single round, k trials per task, under a cost cap."""
+    """Run the task set through a strategy, k trials per task, under a cost cap."""
     from arl.evals import report, runner
     from arl.evals.tasks import load_tasks, select
     from arl.llm.pricing import load_models
 
+    plan = _strategy(strategy)
     model = model or load_models()["default"]
     try:
         chosen = select(load_tasks(), tasks)
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--tasks") from exc
-    est = runner.estimate(chosen, model, trials)
+    est = runner.estimate(chosen, model, trials, strategy=plan.name)
     spent = runner.phase_spent()
     typer.secho("===== ESTIMATE =====", bold=True)
     typer.echo(
-        f"sweep:     {runner.STRATEGY} · {model} · {len(chosen)} tasks × {trials} trials "
+        f"sweep:     {plan.name} · {model} · {len(chosen)} tasks × {trials} trials "
         f"= {est.trials} trials\n"
         f"expected:  ${est.expected_usd:.4f}  (${est.per_trial_expected:.6f} per trial; "
         f"{est.basis})\n"
-        f"worst:     ${est.worst_usd:.4f}  (${est.per_trial_worst:.6f} per trial: every call "
-        f"at max_tokens, no cache)\n"
+        f"worst:     ${est.worst_usd:.4f}  (${est.per_trial_worst:.6f} per trial: "
+        f"{plan.max_calls} calls, every one at max_tokens, no cache)\n"
         f"cap:       ${cap:.4f}  (the sweep halts before any trial whose worst case would "
         f"cross it)\n"
         f"{runner.PHASE} spent so far: ${spent:.4f} of about ${runner.PHASE_BUDGET_USD:.2f}"
@@ -156,7 +171,8 @@ def eval_(
 
     doc = runner.run_sweep(chosen, adapter=make_adapter(model), trials_per_task=trials,
                            cap_usd=cap, est=est,
-                           langfuse=langfuse_client() if langfuse else None, progress=progress)
+                           langfuse=langfuse_client() if langfuse else None, progress=progress,
+                           strategy=plan.name)
     typer.secho(f"\n===== {doc['status'].upper()} =====", bold=True)
     typer.echo(report.summary_table([doc]))
     typer.echo(f"\nresults: results/{doc['sweep_id']}.json   spent: ${doc['spent_usd']:.4f}")
@@ -170,11 +186,15 @@ def report_(
     show: str = typer.Option(None, "--show", help="Print one transcript: a task id or prefix."),
     trial: int = typer.Option(1, "--trial", help="Which trial to show."),
     out: Path = typer.Option(None, "--out", help="Also write the report to this file."),  # noqa: B008
+    tasks: str = typer.Option(None, "--tasks",
+                              help="Only these task ids or prefixes, comma-separated: c07,c08"),
 ) -> None:
     """Tables from results files: summary, categories, per-task variance, paired comparison."""
     from arl.evals import report
 
     docs = [report.load_results(path, regrade=regrade) for path in results]
+    if tasks:
+        docs = [report.restrict(doc, tasks.split(",")) for doc in docs]
     if show:
         typer.echo(report.show_trial(docs[0], show, trial))
         return

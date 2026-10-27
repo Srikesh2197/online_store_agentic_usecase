@@ -197,3 +197,67 @@ Branch `feature_0919_01`. Not committed. Write-up: [stages/02-eval-harness.md](s
 - Does an explicit cache breakpoint before the ticket bring Haiku's request-1 cost near OpenAI's?
 - Is c15 (refuse against escalate) a fair test, given that the policy line "anything outside these rules is escalated" invites escalation? Revisit when the Stage 4 failure taxonomy is built.
 - Would 20 × 5 on all four models change the model choice? It would cost about $0.35, and it is only needed if Stage 3 shows the primary struggling in a loop.
+
+## Stage 3: Hand-written agent loop — built 2026-10-23
+
+Branch `feature_0919_02`. Not committed. Write-up: [stages/03-agent-loop.md](stages/03-agent-loop.md).
+
+### What was built
+
+| Path | Contents |
+|---|---|
+| `src/arl/foundations/hand_loop.py` | Rung 2: `run_hand_loop()`, 155 lines, both providers. `MAX_STEPS = 10` model calls, the reply included. Exits: completed, no_reply, step_cap, truncated, refused, stopped. Trace events `step_cap` and `loop_exit` |
+| `src/arl/evals/runner.py` | `STRATEGIES` registry (`single_round`, `hand_loop`); strategy in the results, ledger and sweep id; worst case summed over `max_calls` with a growing history; `PHASE = "phase-3"` |
+| `src/arl/evals/report.py` | Other-exit counts; paired tables matched on k (first min(k) trials); `restrict()` / `--tasks` |
+| `src/arl/cli.py` | `--strategy` on `arl run` and `arl eval`; `--tasks` on `arl report` |
+| `config/models.yaml` | `gpt-6.1-sol` ($2 / $0.10 / $2.50 / $10), added but not run |
+| `tests/scripted.py` | Scripted fake model: neutral steps rendered as real OpenAI or Anthropic bodies |
+| `tests/test_hand_loop.py`, additions to `test_runner.py` and `test_report.py` | 36 new tests; 250 in total, no API calls |
+| Task files c11, c15, c17 | Two reviewed phrase-list fixes (`$38`; must_not_say no longer matches "no refund has been issued") |
+| `results/` | 2 sweep files, `report-phase3-luna-rung1-vs-rung2.md`, `review/phase3-ten-failures.md` |
+
+### Decisions made
+
+- **The loop branches on the neutral stop reason only.** A call in a truncated response is never run. There is no retry on truncation or refusal (Stage 5).
+- **A tool that raises becomes a `tool_failed` error result.** Tool errors always go back to the model.
+- **At the step cap, the last call is reply-only:** tools off, Phase 1's closing instruction after the results, status `step_cap`. The normal path has no closing instruction.
+- **The runner takes a strategy argument,** not a second runner. The default stays `single_round`, so Phase 2 commands reproduce.
+- **Paired tables match on k.** Phase 2's fake k5-against-k1 wins can no longer happen.
+- **The Haiku cache breakpoint is deferred** to Stage 11.
+- **The model arms were cut.** The PLAN.md reference model (gpt-6.1-sol) and a Haiku rung-1 arm were not run: the project builds an agent, not a model ranking, and gpt-6-luna was already at 50/50 on the planned 10 tasks. One Haiku loop check (10 × 1) was run instead.
+
+### Measured in stage 3
+
+- **Spend: $0.027** ($0.0164 gpt-6-luna sweep, $0.0091 Haiku sweep, $0.0019 smoke runs).
+
+| | Success | pass^5 | Calls/run | $/run | p50 |
+|---|---|---|---|---|---|
+| gpt-6-luna rung 1 | 43% | 35% | 1.95 | $0.000162 | 4.0 s |
+| gpt-6-luna **rung 2** | **91%** | **90%** | 2.83 | $0.000164 | 4.5 s |
+| Haiku rung 2 (10 × 1) | 100% | – | 2.90 | $0.000914 | 6.9 s |
+
+- **The loop wins 12 tasks, loses 1 and ties 7; p = 0.003, a finding.** Writes went from 0% to 100%, escalations from 25% to 100%, refusals from 70% to 55%.
+- **Same cost per run** on gpt-6-luna: 96% of input cached, and shorter outputs.
+- **The step cap never tripped:** at most 5 calls. There were no truncations or refusals.
+- **The loss is c15** (4/5 → 0/5). The model refuses and then escalates, often *after* looking, which rung 1 could not do.
+- **The 10 annotated failures contain no wrong action.** They are judgement (c15) and wording (c16), plus 2 phrase-list false negatives, now fixed.
+
+### What stage 4 needs to know
+
+- **Failures to label come from c15 and c16.** gpt-6-luna's rung-2 failures are almost all there:
+  - c15: over-escalation, "refuse, then escalate";
+  - c16: "Yes, a refund was issued", a misleading reply with a correct db.
+
+  For a failure mix, you need rung-1 transcripts (Phase 2) plus rung-2 transcripts. Rung 2 alone yields few failures.
+- **c15's rule is the open taxonomy question.** Is escalating a clear refusal a failure, or the policy's "anything outside these rules" working as written? Decide it while building the taxonomy, before freezing v1. Haiku refused cleanly; gpt-6-luna escalated in 5 of 5 trials.
+- **Phrase lists:** 2 of 10 verdicts were wrong again (3 of 10 in Phase 2). Both errors were a negation or a number format. Reply quality, the c16 "Yes" in particular, is the judge's job.
+- **Re-running rungs 1 and 2 on v1 at 30 × 5** should cost about $0.03 per arm on gpt-6-luna.
+  - Use `arl eval --strategy hand_loop`.
+  - The estimator's prior for a new strategy is about 10× too high; it switches to measured costs after the first sweep.
+- **Rung-2 transcripts are multi-turn.** `arl report --show` prints each turn's calls. Haiku's summarised thinking is in the raw JSONL (`runs/eval/…`), not in the compact transcript.
+
+### Open questions carried forward
+
+- Does the c16 wording failure need a prompt change, or only a judge to catch it? Decide after Stage 4 labels it.
+- gpt-6.1-sol is configured but unmeasured. Would a stronger model fix c15 and c16, or is the policy text the cause? Haiku's 10 × 1 suggests a model difference, but it is only a direction.
+- The Haiku cache breakpoint (Stage 11).

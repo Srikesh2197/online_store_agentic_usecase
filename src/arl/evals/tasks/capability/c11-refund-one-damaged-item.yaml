@@ -12,7 +12,7 @@ expected:
         - {order_id: ORD-2016, amount_cents: 3800, status: issued}
   reply:
     facts:
-      - ["38.00"]
+      - ["38.00", "a 38 refund", "refunded 38"]
       - ["5 to 7 business days", "5-7 business days", "5 to 7 days", "5-7 days"]
 trajectory:
   must_call: [get_shipment, issue_refund]
