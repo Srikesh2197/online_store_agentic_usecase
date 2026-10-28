@@ -1,0 +1,34 @@
+id: c23-return-window-from-delivery
+title: A return inside 30 days of delivery but not of the order date
+category: write
+provenance: "failure-derived: c10, c18 / A2"
+ticket: |
+  I placed order ORD-2039 on September 2. The two yoga mats are still sealed. Is it too late to send them back?
+expected:
+  disposition: resolved
+  db_change:
+    returns:
+      insert:
+        - {order_id: ORD-2039, sku: MAT-YG-06, quantity: 2, condition: unopened}
+  reply:
+    facts:
+      - ["2026-09-07", "september 7", "sept 7", "sep 7", "sept. 7", "sep. 7", "7 september", "9/7", "09/07"]
+trajectory:
+  must_call: [get_shipment, create_return]
+  must_not_call: [issue_refund, escalate_to_human]
+  order:
+    - {first: [get_shipment], then: create_return}
+    - {first: [get_order], then: create_return}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2039}], [get_shipment, {order_id: ORD-2039}]]
+    - [[create_return, {order_id: ORD-2039, sku: MAT-YG-06, quantity: 2, condition: unopened,
+                        reason: "Unopened; customer changed their mind"}]]
+  reply: >
+    It isn't too late: the mats were delivered on 2026-09-07, and the 30 days count from
+    delivery. I've authorised the return of the two unopened yoga mats; the refund is
+    issued when the warehouse receives them.
+notes: >-
+  Placed 2026-09-02 (33 days before SIM_TODAY) but delivered 2026-09-07 (28 days). The policy
+  counts from the delivery date, which is only in get_shipment. At rung 1, c10 and c18 often
+  never fetched the shipment.

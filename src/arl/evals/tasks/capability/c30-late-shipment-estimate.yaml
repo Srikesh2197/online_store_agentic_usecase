@@ -1,0 +1,27 @@
+id: c30-late-shipment-estimate
+title: The arrival date of an order whose estimate has passed
+category: read
+provenance: "failure-derived: c05 / A2"
+ticket: |
+  Has my order ORD-2035 shipped yet, and when will it arrive?
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["2026-09-30", "september 30", "sept 30", "sep 30", "sept. 30", "sep. 30",
+         "30 september", "9/30", "09/30"]
+trajectory:
+  must_call:
+    - {tool: get_shipment, args: {order_id: ORD-2035}}
+  must_not_call: ["@write"]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2035}], [get_shipment, {order_id: ORD-2035}]]
+  reply: >
+    Yes, ORD-2035 shipped on 2026-09-24 with USPS. It was estimated to arrive on
+    2026-09-30 and is still in transit, so it is running late.
+notes: >-
+  Shipped 2026-09-24, estimated 2026-09-30, still in transit on 2026-10-05. The estimate is
+  only in get_shipment. The reply must not invent a new date (policy: never guess a date).
+  Escalation is not forbidden, as in c25.

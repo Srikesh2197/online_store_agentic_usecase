@@ -19,6 +19,11 @@ from arl.env.tools import TOOLS
 TASKS_DIR = Path(__file__).parent / "tasks"
 DEFAULT_SET = "capability"
 
+# Capability v1, frozen 2026-10-27: 20 tasks written up front (c01-c20) and 10 drawn from
+# observed failures (c21-c30). Baselines and later comparisons are against this hash. A
+# change to any task file changes it, and a test fails; a new version gets a new constant.
+FROZEN_V1_HASH = "76254c561b0d"
+
 TOOL_NAMES = {tool.name for tool in TOOLS}
 KINDS = {tool.kind for tool in TOOLS}
 

@@ -1,0 +1,34 @@
+id: c22-opened-not-defective-mats
+title: Refuse a return of opened items that work, on a new order
+category: refuse
+provenance: "failure-derived: c15 / A3"
+ticket: |
+  I opened both yoga mats from order ORD-2034 and I don't like the colour. Nothing is wrong with them. Can I return them for a refund?
+expected:
+  disposition: refused
+  db_change: {}
+  reply:
+    facts:
+      - ["cannot be returned", "can't be returned", "can not be returned", "not returnable",
+         "not eligible", "isn't eligible", "aren't eligible", "can't accept", "cannot accept",
+         "unable to accept", "can't offer", "cannot offer", "unable to offer",
+         "can't process", "cannot process", "unable to process", "not able to",
+         "cannot authorise", "can't authorise", "cannot authorize", "can't authorize",
+         "does not allow", "doesn't allow"]
+    must_not_say: ["i've refunded", "i have refunded", "has been refunded",
+                   "a refund has been issued", "your refund has been issued",
+                   "the refund has been issued",
+                   "return has been authorised", "return has been authorized",
+                   "i've authorised", "i've authorized"]
+trajectory:
+  must_not_call: [issue_refund, create_return, escalate_to_human]
+reference:
+  turns: []
+  reply: >
+    I'm sorry the colour isn't right, but opened items that are not defective cannot be
+    returned under our policy.
+notes: >-
+  The c15 rule on a different order and item: "Opened items that are not defective cannot be
+  returned". Decided 2026-10-27 that this is a refusal, not a policy exception, so an
+  escalation fails (A3). Delivered 2026-10-03, so the window is not the reason. The refusal
+  phrases are c15's reviewed list.

@@ -1,0 +1,31 @@
+id: c25-tracking-by-email-late
+title: Find an order and its tracking from an email address
+category: read
+provenance: "failure-derived: c03 / A2"
+ticket: |
+  Hi, it's Ana, my email is ana.eriksen9@example.com. I don't know my order number. Where is my order and what's the tracking number?
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["643389120696"]
+      - ["UPS"]
+trajectory:
+  must_call:
+    - find_customer
+    - list_orders
+    - {tool: get_shipment, args: {order_id: ORD-2017}}
+  must_not_call: ["@write"]
+reference:
+  turns:
+    - [[find_customer, {email: ana.eriksen9@example.com}]]
+    - [[list_orders, {customer_id: CUS-0109, limit: null}]]
+    - [[get_shipment, {order_id: ORD-2017}]]
+  reply: >
+    Your order ORD-2017 is in transit with UPS, tracking number 643389120696. It was
+    estimated to arrive on 2026-09-17 and has not been delivered yet.
+notes: >-
+  The c03 chain (email, then orders, then shipment) for another customer. Ana (CUS-0109) has
+  one order. Its estimate, 2026-09-17, has passed, so an honest reply says it is late.
+  Escalation is not forbidden: offering one for a late order is reasonable.

@@ -1,0 +1,36 @@
+id: c24-damaged-out-of-window
+title: Escalate a damaged-item refund reported after 30 days
+category: escalate
+provenance: "failure-derived: c17 / A1"
+ticket: |
+  One of the yoga mats from order ORD-2009 has a tear in it. I only just unrolled it. Can I get a refund for it?
+expected:
+  disposition: escalated
+  db_change:
+    escalations:
+      insert:
+        - {category: policy_exception, order_id: ORD-2009, status: open}
+  reply:
+    facts:
+      - ["30 days", "30-day"]
+    must_not_say: ["i've refunded", "i have refunded", "has been refunded",
+                   "a refund has been issued", "your refund has been issued",
+                   "the refund has been issued"]
+trajectory:
+  must_call: [escalate_to_human]
+  must_not_call: [issue_refund, create_return]
+  order:
+    - {first: [get_shipment], then: escalate_to_human}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2009}], [get_shipment, {order_id: ORD-2009}]]
+    - [[escalate_to_human, {category: policy_exception, order_id: ORD-2009, customer_id: CUS-0104,
+                            summary: "Torn yoga mat reported 39 days after delivery; outside the 30-day window."}]]
+  reply: >
+    The order was delivered on 2026-08-27, more than 30 days ago, so I can't refund the mat
+    myself. I've escalated it to our support team as a policy exception; they will reply
+    within one business day.
+notes: >-
+  Delivered 2026-08-27, 39 days before SIM_TODAY. "Damaged within 30 days" does not apply, so
+  it is a policy-exception escalation after checking the delivery date. The escalation
+  phrase is left to the db check and the judge, not a phrase list.

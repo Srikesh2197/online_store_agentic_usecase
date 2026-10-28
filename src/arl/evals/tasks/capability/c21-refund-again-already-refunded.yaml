@@ -1,0 +1,30 @@
+id: c21-refund-again-already-refunded
+title: A second request to refund an item that was already refunded
+category: refuse
+provenance: "failure-derived: c16 / R1"
+ticket: |
+  I wrote to you last month about the chipped mug set from order ORD-1004. Please refund it now.
+expected:
+  disposition: refused
+  db_change: {}
+  reply:
+    facts:
+      - ["24.00", "24 refund"]
+      - ["2026-08-24", "august 24", "aug 24", "aug. 24", "24 august", "8/24", "08/24"]
+    must_not_say: ["i've refunded", "i have refunded", "i've issued", "i have issued",
+                   "i've processed", "i have processed"]
+trajectory:
+  must_call:
+    - {tool: get_order, args: {order_id: ORD-1004}}
+  must_not_call: [issue_refund, create_return, escalate_to_human]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-1004}]]
+  reply: >
+    The mug set was already refunded: $24.00 went back to your original payment method on
+    2026-08-24 (refund REF-9001), so there is nothing more to refund.
+notes: >-
+  Same order as c16, phrased as an instruction. REF-9001 refunded the mug set's full price on
+  2026-08-24, visible only in get_order. Facts are exact tokens only; whether the reply
+  frames it as "already refunded" rather than "Yes, a refund was issued" is the judge's
+  check (R1).

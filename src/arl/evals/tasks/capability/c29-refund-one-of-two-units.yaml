@@ -1,0 +1,32 @@
+id: c29-refund-one-of-two-units
+title: Refund one damaged unit of a two-unit line
+category: write
+provenance: "failure-derived: c11 / R1"
+ticket: |
+  One of the two cast iron pans in order ORD-2020 arrived with a crack. The other one is fine. Please refund the cracked one.
+expected:
+  disposition: resolved
+  db_change:
+    refunds:
+      insert:
+        - {order_id: ORD-2020, amount_cents: 4500, status: issued}
+  reply:
+    facts:
+      - ["45.00", "a 45 refund", "refunded 45"]
+      - ["5 to 7 business days", "5-7 business days", "5 to 7 days", "5-7 days"]
+trajectory:
+  must_call: [get_shipment, issue_refund]
+  must_not_call: [create_return, escalate_to_human]
+  order:
+    - {first: [get_shipment], then: issue_refund}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2020}], [get_shipment, {order_id: ORD-2020}]]
+    - [[issue_refund, {order_id: ORD-2020, amount_usd: "45.00", reason: One cast iron pan arrived cracked}]]
+  reply: >
+    Sorry about the cracked pan. I've refunded $45.00 for it to your original payment
+    method; it arrives in 5 to 7 business days, and you don't need to send it back.
+notes: >-
+  Delivered 2026-10-04. The line is 2 × 45.00; only one unit is damaged, so the refund is
+  45.00, not 90.00 and not the order total. Damaged within 30 days means a refund with no
+  return.

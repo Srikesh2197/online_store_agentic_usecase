@@ -98,3 +98,75 @@ def test_summary_counts_runs_that_ended_without_a_reply():
     for trial, status in zip(doc["trials"], ["completed", "step_cap", "truncated"]):
         trial["transcript"] = {"status": status}
     assert summary(doc)["exits"] == {"step_cap": 1, "truncated": 1}
+
+
+# --- The advisory judge column and the provenance split ----------------------------------
+
+def _judged_doc():
+    doc = _doc({"c01-a": [True, True], "c16-b": [True, False]})
+    for n, t in enumerate(doc["trials"]):
+        t["trial"] = n % 2 + 1
+    # code facts: c01 pass pass; c16 pass (k1), fail (k2)
+    doc["trials"][3]["verdict"]["groups"]["facts"] = False
+    doc["judge"] = {"prompt_hash": "abc123", "validation": {"tpr": 0.8, "tnr": 0.9},
+                    "trials": [
+                        {"task_id": "c01-a", "trial": 1, "verdict": "pass", "critique": "ok",
+                         "failure_codes": []},
+                        {"task_id": "c01-a", "trial": 2, "verdict": None, "critique": "",
+                         "failure_codes": [], "error": "refused"},
+                        {"task_id": "c16-b", "trial": 1, "verdict": "fail",
+                         "critique": "Says Yes | to a repeat", "failure_codes": ["R1"]},
+                        {"task_id": "c16-b", "trial": 2, "verdict": "fail", "critique": "x",
+                         "failure_codes": []}]}
+    return doc
+
+
+def test_judge_table_is_separate_from_success():
+    from arl.evals.report import judge_table
+
+    doc = _judged_doc()
+    before = summary(doc)["success"]
+    table = judge_table([doc])
+    assert summary(doc)["success"] == before == 0.75
+    # judged 4, 1 error; judge pass 1/3; corrected = 1 - ((2/3) + 0.9 - 1) / 0.7
+    row = table.splitlines()[2]
+    assert "| 4 | 1 | 33% | 19% |" in row
+    # facts✓judge✓ 1, facts✓judge✗ 1, facts✗judge✓ 0, facts✗judge✗ 1
+    assert "| 1 | 1 | 0 | 1 | abc123 |" in row
+
+
+def test_disagreements_list_the_trials_to_read():
+    from arl.evals.report import disagreements
+
+    text = disagreements(_judged_doc())
+    assert "c16-b | 1 | pass | fail | R1 | Says Yes / to a repeat" in text
+    assert "c01-a" not in text
+
+
+def test_full_report_has_a_judge_section_only_with_a_sidecar():
+    from arl.evals.report import full_report
+
+    assert "Reply judge (advisory" in full_report([_judged_doc()])
+    assert "Reply judge" not in full_report([_doc({"c01-a": [True]})])
+
+
+def test_provenance_table_splits_original_and_failure_derived():
+    from arl.evals.report import full_report, provenance_table
+
+    doc = _doc({"c01-status-shipped": [True, True], "c29-refund-one-of-two-units": [False, True]})
+    doc["task_set"] = "capability"
+    table = provenance_table([doc])
+    assert "100% (1 tasks, 2 trials) | 50% (1 tasks, 2 trials)" in table
+    assert "Original and failure-derived tasks" in full_report([doc])
+
+
+def test_load_results_attaches_a_judge_sidecar(tmp_path):
+    import json
+
+    from arl.evals.report import load_results
+
+    path = tmp_path / "sweep.json"
+    path.write_text(json.dumps(_doc({"a": [True]})))
+    assert "judge" not in load_results(path)
+    (tmp_path / "sweep.judge.json").write_text(json.dumps({"prompt_hash": "p", "trials": []}))
+    assert load_results(path)["judge"]["prompt_hash"] == "p"

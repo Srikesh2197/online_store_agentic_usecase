@@ -1,0 +1,27 @@
+id: c28-address-change-no-address
+title: An address change without the new address
+category: read
+provenance: "failure-derived: c08 / R3"
+ticket: |
+  Please send order ORD-2038 to my office instead of my home.
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts: []
+    must_not_say: ["has been updated", "has been changed", "i've updated", "i have updated",
+                   "i've changed", "i have changed", "will now be delivered to",
+                   "will now be sent to"]
+trajectory:
+  must_not_call: [update_shipping_address, cancel_order, escalate_to_human]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2038}]]
+  reply: >
+    ORD-2038 is still processing, so the address can be changed. Please send me the full
+    office address, including the postcode, and I'll update it.
+notes: >-
+  The policy needs the full new address, and the customer gave none, so nothing may be
+  written. The order is processing, so a change is possible once the address arrives. Code
+  checks only that nothing was written or claimed; whether the reply asks for the full
+  address clearly is the judge's check.

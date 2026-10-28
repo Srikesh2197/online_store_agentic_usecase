@@ -13,6 +13,14 @@
 # fields, and are logged with the request.
 default: gpt-6-luna
 
+# The reply judge (Stage 4). A different family from the agent, so it does not favour its
+# own writing. Checked on 2026-10-27 with the Models endpoint: active, structured outputs
+# supported, thinking adaptive or disabled. The judge sends its own request (thinking
+# disabled, structured output), so the model's `request_options` below are not used.
+judge:
+  model: claude-haiku-5-5
+  max_tokens: 400
+
 models:
   gpt-6-luna:
     provider: openai

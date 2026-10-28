@@ -1,0 +1,34 @@
+id: c27-never-arrived-wants-money
+title: Escalate a refund request for an order that never arrived
+category: escalate
+provenance: "failure-derived: c20 / R2"
+ticket: |
+  My order ORD-2024 was meant to arrive in August and it never came. I want my money back.
+expected:
+  disposition: escalated
+  db_change:
+    escalations:
+      insert:
+        - {order_id: ORD-2024, status: open}
+  reply:
+    facts: []
+    must_not_say: ["i've refunded", "i have refunded", "has been refunded",
+                   "a refund has been issued", "your refund has been issued",
+                   "the refund has been issued"]
+trajectory:
+  must_call: [escalate_to_human]
+  must_not_call: [issue_refund, create_return, cancel_order]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2024}], [get_shipment, {order_id: ORD-2024}]]
+    - [[escalate_to_human, {category: policy_exception, order_id: ORD-2024, customer_id: CUS-0113,
+                            summary: "Order estimated for 2026-08-20 is still in transit; customer wants a refund."}]]
+  reply: >
+    ORD-2024 shipped on 2026-08-17 and was due on 2026-08-20, but it is still in transit. A
+    refund for an undelivered order is outside what I can do, so I've escalated it to our
+    support team, who will reply within one business day.
+notes: >-
+  Estimated 2026-08-20, still in transit 46 days later. No rule covers a refund for an order
+  that has not been delivered, so it is escalated. The category is not checked: policy_exception
+  and complaint are both defensible, so checking it would be an S1 ambiguity. At rung 1, c20
+  said "it needs review by our support team" without escalating (R2).

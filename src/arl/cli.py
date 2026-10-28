@@ -178,6 +178,213 @@ def eval_(
     typer.echo(f"\nresults: results/{doc['sweep_id']}.json   spent: ${doc['spent_usd']:.4f}")
 
 
+@app.command("label")
+def label_(
+    build_pool: bool = typer.Option(False, "--build-pool",
+                                    help="Sample the items to label from the Phase 2-3 results."),
+    top_up: int = typer.Option(0, "--top-up", min=0,
+                               help="Add this many more items from the failure strata."),
+    split: bool = typer.Option(False, "--split",
+                               help="Split the labelled items into examples / tuning / test."),
+) -> None:
+    """Label replies pass or fail, with a one-line critique. Resumable: q quits, nothing is lost."""
+    from collections import Counter
+
+    from arl.evals import labels as lab
+    from arl.evals.report import load_results
+
+    pool = lab.read_pool()
+    if build_pool or top_up:
+        docs = [load_results(p, regrade=True) for p in sorted(lab.ROOT.glob("results/2026*.json"))
+                if not p.name.endswith(".judge.json")]
+        candidates = lab.candidates(docs)
+        if build_pool:
+            if pool:
+                raise typer.BadParameter(f"{lab.POOL_FILE} already exists; it is frozen.")
+            items = lab.number(lab.sample(candidates))
+            lab.write_pool(items)
+        else:
+            share = top_up // len(lab.FAIL_STRATA)
+            targets = {s: share + (n < top_up % len(lab.FAIL_STRATA))
+                       for n, s in enumerate(lab.FAIL_STRATA)}
+            items = lab.number(lab.sample(candidates, targets, seed=lab.SEED + 1, exclude=pool),
+                               start=len(pool) + 1)
+            lab.write_pool(items, append=True)
+        strata = ", ".join(f"{s} {n}" for s, n in sorted(Counter(i.stratum for i in items).items()))
+        typer.echo(f"Wrote {len(items)} items to {lab.POOL_FILE.relative_to(lab.ROOT)} ({strata}).")
+        return
+    if not pool:
+        raise typer.BadParameter("No pool yet. Run `arl label --build-pool` first.")
+    if split:
+        result = lab.make_split(pool, lab.read_labels())
+        lab.write_split(result)
+        typer.echo(f"Split with seed {result['seed']}: "
+                   + ", ".join(f"{s} {len(result[s])} items / {len(result['tasks'][s])} tasks"
+                               for s in ("examples", "tuning", "test"))
+                   + f"\nWritten to {lab.SPLIT_FILE.relative_to(lab.ROOT)}.")
+        return
+    lab.label_loop(pool, lab.LABELS_FILE, ask=typer.prompt, echo=typer.echo)
+
+
+def _judge_send():
+    from anthropic import Anthropic
+
+    from arl.llm.anthropic_adapter import anthropic_sender
+
+    return anthropic_sender(Anthropic())
+
+
+def _judge_estimate(est, cap: float) -> None:
+    typer.secho("===== JUDGE ESTIMATE =====", bold=True)
+    typer.echo(
+        f"calls:     {est.calls}  (shared prompt about {est.prefix_tokens} tokens, cached; "
+        f"case about {est.case_tokens} tokens)\n"
+        f"expected:  ${est.expected_usd:.4f}  (${est.per_call_expected:.6f} per call)\n"
+        f"worst:     ${est.worst_usd:.4f}  (${est.per_call_worst:.6f} per call: no cache, "
+        f"every call at max_tokens)\n"
+        f"cap:       ${cap:.4f}  (halts before any call whose worst case would cross it)")
+
+
+@app.command("judge-validate")
+def judge_validate(
+    split_name: str = typer.Option(..., "--split", help="tuning or test (test is scored once)."),
+    note: str = typer.Option("", "--note", help="What changed in the prompt (tuning log)."),
+    cap: float = typer.Option(0.10, "--cap", help="Hard cost cap, in US dollars."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the estimate and stop."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask before spending."),
+    force: bool = typer.Option(False, "--force", help="Score the test split again (recorded)."),
+    limit: int = typer.Option(0, "--limit", min=0, help="Only the first N items (a smoke test)."),
+) -> None:
+    """Score the judge against your labels on one split: confusion matrix, rates, intervals."""
+    import json as _json
+
+    from arl.evals import judge_validation as jv
+    from arl.evals import labels as lab
+    from arl.evals.graders import judge as jg
+
+    if split_name not in ("tuning", "test"):
+        raise typer.BadParameter("tuning or test", param_hint="--split")
+    pool, labels, split = lab.read_pool(), lab.read_labels(), lab.read_split()
+    by_id = {i.item_id: i for i in pool}
+    items = [by_id[i] for i in split[split_name]][: limit or None]
+    lock = lab.LABELS_DIR / "test.lock"
+    if split_name == "test" and lock.exists() and not force and not dry_run:
+        raise typer.BadParameter(f"The test split was already scored ({lock.read_text().strip()}). "
+                                 "It is scored once; --force re-scores and is recorded.")
+    run_id = f"{jg._stamp()}-judge-{split_name}"
+    judge = jg.Judge(_judge_send() if not dry_run else None,
+                     jg.examples_from_split(pool, labels, split),
+                     tracer=None if dry_run else jg.make_tracer(run_id))
+    est = jg.estimate(judge, items)
+    typer.echo(f"split: {split_name}, {len(items)} items · prompt {judge.prompt_hash} "
+               f"({jg.PROMPT_VERSION}) · model {judge.model}")
+    _judge_estimate(est, cap)
+    if dry_run:
+        return
+    if not yes:
+        typer.confirm("Run the judge?", abort=True)
+
+    def progress(item, verdict, spent):
+        human = labels[item.item_id].label
+        mark = "ERROR" if verdict.error else ("agree" if verdict.verdict == human else "DISAGREE")
+        typer.echo(f"{item.item_id} {item.task_id[:3]}  human {human:<4} judge "
+                   f"{verdict.verdict or '-':<4} {mark:<8} ${spent:.4f}  {verdict.critique[:90]}")
+
+    verdicts, status, spent = jg.judge_batch(judge, items, cap, est.per_call_worst, progress)
+    human = [labels[i.item_id].label for i in items[: len(verdicts)]]
+    validation = jv.validate(human, [v.verdict for v in verdicts])
+    out = lab.LABELS_DIR / f"{run_id}.json"
+    out.write_text(_json.dumps({
+        "run_id": run_id, "split": split_name, "prompt_version": jg.PROMPT_VERSION,
+        "prompt_hash": judge.prompt_hash, "model": judge.model, "status": status,
+        "spent_usd": spent, "forced": force, "note": note,
+        "validation": validation.to_dict(),
+        "items": [{"item_id": i.item_id, "task_id": i.task_id, "human": labels[i.item_id].label,
+                   "human_critique": labels[i.item_id].critique, **v.to_dict()}
+                  for i, v in zip(items, verdicts, strict=False)],
+    }, indent=1) + "\n")
+    text = jv.report(validation, f"{split_name} · prompt {judge.prompt_hash}")
+    typer.echo("\n" + text)
+    if split_name == "tuning":
+        log = lab.LABELS_DIR / "tuning-log.md"
+        if not log.exists():
+            log.write_text("# Judge tuning log\n\n| Run | Prompt | TPR | TNR | Kappa | Errors | "
+                           "$ | What changed |\n|---|---|---|---|---|---|---|---|\n")
+        c = validation.confusion
+        with log.open("a") as f:
+            f.write(f"| {run_id} | {judge.prompt_hash} | {jv._fmt(c.tpr)} | {jv._fmt(c.tnr)} | "
+                    f"{jv._fmt(c.kappa)} | {validation.judge_errors} | {spent:.4f} | {note} |\n")
+    else:
+        lock.write_text(f"{run_id} prompt {judge.prompt_hash}" + (" (forced)" if force else "")
+                        + "\n")
+        (lab.LABELS_DIR / "validation-v1.json").write_text(_json.dumps({
+            "run_id": run_id, "prompt_hash": judge.prompt_hash, "model": judge.model,
+            "forced": force, **validation.to_dict()}, indent=1) + "\n")
+        (lab.LABELS_DIR / "validation-v1.md").write_text(
+            f"# Judge validation, held-out set\n\nRun `{run_id}`, judge `{judge.model}`, "
+            f"prompt `{judge.prompt_hash}` ({jg.PROMPT_VERSION}), {len(verdicts)} items, "
+            f"${spent:.4f}." + (" **Re-scored with --force.**" if force else "")
+            + "\n\n" + text)
+    jg._ledger(run_id, "labels", len(verdicts), est, cap, spent, status, out.name, judge.model)
+    typer.echo(f"results: {out.relative_to(lab.ROOT)}   spent: ${spent:.4f}   status: {status}")
+
+
+@app.command("judge")
+def judge_(
+    results: Path = typer.Argument(..., help="A results file from `arl eval`."),  # noqa: B008
+    cap: float = typer.Option(0.20, "--cap", help="Hard cost cap, in US dollars."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the estimate and stop."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask before spending."),
+) -> None:
+    """Add the advisory judge column to a sweep: writes <results>.judge.json beside it."""
+    import json as _json
+
+    from arl.evals import labels as lab
+    from arl.evals.graders import judge as jg
+    from arl.evals.report import load_results
+    from arl.evals.transcript import Transcript
+
+    doc = load_results(results)
+    trials = [t for t in doc["trials"] if t["success"] is not None]
+    items = [jg.item_from_transcript(Transcript.from_dict(t["transcript"]),
+                                     f"{t['task_id']}#k{t['trial']}") for t in trials]
+    pool, labels, split = lab.read_pool(), lab.read_labels(), lab.read_split()
+    run_id = f"{jg._stamp()}-judge-{doc['sweep_id']}"
+    judge = jg.Judge(_judge_send() if not dry_run else None,
+                     jg.examples_from_split(pool, labels, split),
+                     tracer=None if dry_run else jg.make_tracer(run_id))
+    validation_file = lab.LABELS_DIR / "validation-v1.json"
+    validation = _json.loads(validation_file.read_text()) if validation_file.exists() else None
+    if validation and validation["prompt_hash"] != judge.prompt_hash:
+        typer.secho(f"warning: prompt {judge.prompt_hash} is not the validated prompt "
+                    f"{validation['prompt_hash']}; the corrected rate will not be shown.",
+                    fg="yellow")
+    est = jg.estimate(judge, items)
+    typer.echo(f"sweep: {doc['sweep_id']}, {len(items)} trials · prompt {judge.prompt_hash}")
+    _judge_estimate(est, cap)
+    if dry_run:
+        return
+    if not yes:
+        typer.confirm("Run the judge?", abort=True)
+    verdicts, status, spent = jg.judge_batch(
+        judge, items, cap, est.per_call_worst,
+        lambda item, v, total: typer.echo(f"{item.item_id:<38} {v.verdict or 'ERROR':<5} "
+                                          f"${total:.4f}  {v.critique[:80]}"))
+    sidecar = Path(results).with_suffix(".judge.json")
+    sidecar.write_text(_json.dumps({
+        "run_id": run_id, "sweep_id": doc["sweep_id"], "model": judge.model,
+        "prompt_version": jg.PROMPT_VERSION, "prompt_hash": judge.prompt_hash,
+        "validation": (validation if validation
+                       and validation["prompt_hash"] == judge.prompt_hash else None),
+        "status": status, "spent_usd": spent,
+        "trials": [{"task_id": t["task_id"], "trial": t["trial"], **v.to_dict()}
+                   for t, v in zip(trials, verdicts, strict=False)],
+    }, indent=1) + "\n")
+    jg._ledger(run_id, doc["task_set"], len(verdicts), est, cap, spent, status, sidecar.name,
+               judge.model)
+    typer.echo(f"\njudge column: {sidecar}   spent: ${spent:.4f}   status: {status}")
+
+
 @app.command("report")
 def report_(
     results: list[Path] = typer.Argument(..., help="Results files; the first is arm A."),  # noqa: B008

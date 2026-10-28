@@ -1,4 +1,4 @@
-"""The 20 tasks: they load, they are consistent, and their reference runs pass.
+"""The 30 tasks of capability v1: they load, they are consistent, and their reference runs pass.
 
 Replaying each task's reference solution against a fresh store proves two things: the
 task can be passed, and the graders accept a correct run. A broken variant per category
@@ -25,11 +25,19 @@ TASKS = load_tasks()
 BY_ID = {t.id: t for t in TASKS}
 
 
-def test_twenty_tasks_with_the_planned_mix():
-    assert len(TASKS) == 20
-    assert len({t.id for t in TASKS}) == 20
-    assert Counter(t.category for t in TASKS) == {"read": 6, "write": 6, "refuse": 4,
-                                                   "escalate": 4}
+def test_thirty_tasks_with_the_planned_mix():
+    assert len(TASKS) == 30
+    assert len({t.id for t in TASKS}) == 30
+    assert Counter(t.category for t in TASKS) == {"read": 9, "write": 9, "refuse": 6,
+                                                   "escalate": 6}
+
+
+def test_twenty_original_and_ten_failure_derived():
+    derived = [t for t in TASKS if t.provenance.startswith("failure-derived:")]
+    assert len(derived) == 10
+    assert [t.id[:3] for t in derived] == [f"c{n}" for n in range(21, 31)]
+    assert Counter(t.category for t in TASKS if t not in derived) == {
+        "read": 6, "write": 6, "refuse": 4, "escalate": 4}
 
 
 @pytest.mark.parametrize("task", TASKS, ids=lambda t: t.id)
@@ -147,9 +155,57 @@ def test_unknown_tool_and_missing_order_are_reported():
 
 
 def test_select_by_category_prefix_and_mix():
-    assert len(select(TASKS, "refuse")) == 4
+    assert len(select(TASKS, "refuse")) == 6
     assert [t.id for t in select(TASKS, "c01,c07")] == ["c01-status-shipped",
                                                          "c07-cancel-processing"]
-    assert len(select(TASKS, "c01,escalate")) == 5
+    assert len(select(TASKS, "c01,escalate")) == 7
     with pytest.raises(ValueError):
         select(TASKS, "c99")
+
+
+# --- The failure-derived tasks reject the mistake they were drawn from ------------------
+
+def test_c29_refunding_both_units_fails_on_db():
+    task = _variant("c29-refund-one-of-two-units", [
+        [("get_order", {"order_id": "ORD-2020"}), ("get_shipment", {"order_id": "ORD-2020"})],
+        [("issue_refund", {"order_id": "ORD-2020", "amount_usd": "90.00", "reason": "cracked"})]])
+    assert _failed(task) == {"db"}
+
+
+def test_c23_return_without_seeing_the_delivery_date_fails_on_order():
+    task = _variant("c23-return-window-from-delivery", [
+        [("get_order", {"order_id": "ORD-2039"})],
+        [("get_shipment", {"order_id": "ORD-2039"}),
+         ("create_return", {"order_id": "ORD-2039", "sku": "MAT-YG-06", "quantity": 2,
+                            "condition": "unopened", "reason": "sealed"})]])
+    assert _failed(task) == {"order get_shipment before create_return"}
+
+
+def test_c22_escalating_fails_like_c15():
+    task = _variant("c22-opened-not-defective-mats", [[("escalate_to_human", {
+        "category": "policy_exception", "summary": "Opened mats, wants a return",
+        "order_id": "ORD-2034", "customer_id": None})]])
+    assert _failed(task) == {"db", "must_not_call"}
+
+
+def test_c26_cancelling_the_wrong_tent_order_fails():
+    task = _variant("c26-cancel-by-email-and-month", [
+        [("find_customer", {"email": "ben.fontaine16@example.com"})],
+        [("list_orders", {"customer_id": "CUS-0116", "limit": None})],
+        [("cancel_order", {"order_id": "ORD-2030", "reason": "wrong one"})]])
+    assert {"db", "must_call cancel_order(order_id=ORD-2031)"} <= _failed(task)
+
+
+def test_c21_issuing_a_second_refund_fails():
+    task = _variant("c21-refund-again-already-refunded", [
+        [("get_order", {"order_id": "ORD-1004"})],
+        [("issue_refund", {"order_id": "ORD-1004", "amount_usd": "24.00", "reason": "chipped"})]])
+    assert "must_not_call" in _failed(task)
+
+
+def test_capability_v1_is_frozen():
+    """Any edit to a task file breaks this. Changing v1 needs a reviewed decision and a new
+    version, not an edit: results graded on v1 must stay comparable."""
+    from arl.evals.tasks import FROZEN_V1_HASH, task_set_hash
+
+    assert task_set_hash("capability") == FROZEN_V1_HASH

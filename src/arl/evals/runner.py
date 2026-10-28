@@ -39,7 +39,7 @@ from arl.tracing.tracer import RUNS_DIR, Tracer, read_events
 RESULTS_DIR = ROOT / "results"
 LEDGER_NAME = "spend.csv"
 EVAL_RUNS_DIR = RUNS_DIR / "eval"
-PHASE = "phase-3"
+PHASE = "phase-4"
 PHASE_BUDGET_USD = 1.00
 
 

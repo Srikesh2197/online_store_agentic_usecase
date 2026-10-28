@@ -28,6 +28,9 @@ def load_results(path: Path, regrade: bool = False) -> dict:
     """A results file. With `regrade`, every stored transcript is graded again against the
     task files as they are now, so a fixed phrase list or rule shows up without a re-run."""
     doc = json.loads(Path(path).read_text())
+    sidecar = Path(path).with_suffix(".judge.json")
+    if sidecar.exists():   # the advisory judge column, from `arl judge`
+        doc["judge"] = json.loads(sidecar.read_text())
     if regrade:
         tasks = by_id(load_tasks(doc["task_set"]))
         for trial in doc["trials"]:
@@ -249,6 +252,78 @@ def paired_table(a: dict, b: dict) -> str:
     return _table(["task", "category", "A", "B", "better"], rows) + "\n" + footer
 
 
+def provenance_table(docs: list[dict]) -> str:
+    """Success for the tasks written up front and the failure-derived ones, apart: the
+    second group was chosen to be hard for the early rungs, so pooling them hides that."""
+    provenance = {}
+    for doc in [d for d in docs if d.get("task_set")]:
+        for task in load_tasks(doc["task_set"]):
+            provenance[task.id] = ("failure-derived" if task.provenance.startswith("failure-derived")
+                                   else "original")
+    rows = []
+    for doc in docs:
+        groups = defaultdict(list)
+        for t in doc["trials"]:
+            if t["success"] is not None:
+                groups[provenance.get(t["task_id"], "original")].append(bool(t["success"]))
+        tasks = defaultdict(set)
+        for t in doc["trials"]:
+            tasks[provenance.get(t["task_id"], "original")].add(t["task_id"])
+        rows.append([arm_name(doc)] + [
+            f"{_pct(statistics.mean(groups[g]))} ({len(tasks[g])} tasks, {len(groups[g])} trials)"
+            if groups[g] else "–" for g in ("original", "failure-derived")])
+    return _table(["arm", "original", "failure-derived"], rows)
+
+
+def _judged(doc: dict) -> list[tuple[dict, dict]]:
+    """(trial, judge verdict) pairs for the graded trials the judge saw."""
+    verdicts = {(v["task_id"], v["trial"]): v for v in doc["judge"]["trials"]}
+    return [(t, verdicts[(t["task_id"], t["trial"])]) for t in doc["trials"]
+            if t["success"] is not None and (t["task_id"], t["trial"]) in verdicts]
+
+
+def judge_table(docs: list[dict]) -> str:
+    """The advisory judge column, beside the code facts check it is meant to complement.
+
+    The judge never changes `success`. The corrected rate uses the held-out TPR and TNR,
+    and is shown only when the sidecar was made with the validated prompt.
+    """
+    from arl.evals.judge_validation import corrected_pass_rate
+
+    rows = []
+    for doc in [d for d in docs if d.get("judge")]:
+        pairs = _judged(doc)
+        ok = [(t, v) for t, v in pairs if v["verdict"]]
+        judge_pass = statistics.mean(v["verdict"] == "pass" for _, v in ok) if ok else None
+        validation = doc["judge"].get("validation")
+        corrected = (corrected_pass_rate(judge_pass, validation["tpr"], validation["tnr"])
+                     if validation and judge_pass is not None
+                     and validation.get("tpr") is not None and validation.get("tnr") is not None
+                     else None)
+        cells = Counter((bool(t["verdict"]["groups"]["facts"]), v["verdict"] == "pass")
+                        for t, v in ok)
+        rows.append([
+            arm_name(doc), len(pairs), len(pairs) - len(ok), _pct(judge_pass), _pct(corrected),
+            _pct(statistics.mean(bool(t["verdict"]["groups"]["facts"]) for t, _ in ok) if ok else None),
+            cells[(True, True)], cells[(True, False)], cells[(False, True)], cells[(False, False)],
+            doc["judge"]["prompt_hash"],
+        ])
+    return _table(["arm", "judged", "judge errors", "judge ✓ (advisory)", "corrected",
+                   "code facts ✓", "facts ✓ judge ✓", "facts ✓ judge ✗", "facts ✗ judge ✓",
+                   "facts ✗ judge ✗", "prompt"], rows)
+
+
+def disagreements(doc: dict, limit: int = 20) -> str:
+    """Trials where the code facts check and the judge disagree: the ones to read."""
+    rows = [[t["task_id"], t["trial"], "pass" if t["verdict"]["groups"]["facts"] else "FAIL",
+             v["verdict"], ", ".join(v["failure_codes"]) or "–", v["critique"].replace("|", "/")]
+            for t, v in _judged(doc)
+            if v["verdict"] and bool(t["verdict"]["groups"]["facts"]) != (v["verdict"] == "pass")]
+    more = f"\n\n{len(rows) - limit} more not shown." if len(rows) > limit else ""
+    return _table(["task", "trial", "code facts", "judge", "codes", "judge critique"],
+                  rows[:limit]) + more
+
+
 def full_report(docs: list[dict]) -> str:
     parts = []
     regraded = [d for d in docs if d.get("regraded_with")]
@@ -261,6 +336,14 @@ def full_report(docs: list[dict]) -> str:
         parts.append(f"_Restricted to {len(restricted[0]['restricted_to'])} tasks: "
                      f"{', '.join(restricted[0]['restricted_to'])}._")
     parts += ["## Summary", summary_table(docs), "## Success by category", category_table(docs)]
+    if any(t.provenance.startswith("failure-derived")
+           for d in docs if d.get("task_set") for t in load_tasks(d["task_set"])
+           if t.id in d["task_ids"]):
+        parts += ["## Original and failure-derived tasks", provenance_table(docs)]
+    if any(d.get("judge") for d in docs):
+        parts += ["## Reply judge (advisory, not part of success)", judge_table(docs)]
+        for doc in [d for d in docs if d.get("judge")]:
+            parts += [f"### Code facts and judge disagree: {arm_name(doc)}", disagreements(doc)]
     for doc in docs:
         if doc["trials_per_task"] > 1:
             parts += [f"## Per-task variance: {arm_name(doc)}", variance_table(doc)]

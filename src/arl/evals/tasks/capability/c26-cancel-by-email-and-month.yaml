@@ -1,0 +1,32 @@
+id: c26-cancel-by-email-and-month
+title: Cancel an order identified by email and a description
+category: write
+provenance: "failure-derived: c12 / A2"
+ticket: |
+  This is Ben, ben.fontaine16@example.com. Please cancel the tent order I placed in the middle of September.
+expected:
+  disposition: resolved
+  db_change:
+    orders:
+      update:
+        ORD-2031: {status: cancelled}
+  reply:
+    facts:
+      - ["cancelled", "canceled"]
+      - ["ORD-2031"]
+trajectory:
+  must_call:
+    - {tool: cancel_order, args: {order_id: ORD-2031}}
+  must_not_call: ["@escalate"]
+  order:
+    - {first: [list_orders, get_order], then: cancel_order}
+reference:
+  turns:
+    - [[find_customer, {email: ben.fontaine16@example.com}]]
+    - [[list_orders, {customer_id: CUS-0116, limit: null}]]
+    - [[cancel_order, {order_id: ORD-2031, reason: Customer asked to cancel}]]
+  reply: Your tent order ORD-2031, placed on 2026-09-17, is cancelled.
+notes: >-
+  Ben (CUS-0116) has three orders, all with a tent; only ORD-2031 was placed in mid-September
+  (2026-09-17) and it is processing. The others were placed 2026-08-13 and 2026-10-03 and are
+  delivered. The c12 pattern: at rung 1 the model found the customer, then asked for the order ID.
