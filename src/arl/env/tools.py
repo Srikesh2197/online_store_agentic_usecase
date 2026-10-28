@@ -11,8 +11,14 @@ went wrong and what to do instead.
 Write tools validate their own input: the shape of the arguments, that the records exist,
 and states the data cannot represent (cancelling a cancelled order, returning a SKU that
 is not in the order). They do not enforce the support policy (the 30-day window, refund
-limits, who may change an order). In this stage those rules are only in policy.md, for the
-model to follow.
+limits, who may change an order). Those rules are in policy.md, for the model to follow.
+
+Stage 5 adds three things, all switched by the trial's environment (`conn.env`), so with the
+default environment the tools behave exactly as before:
+- the exact part of the policy, enforced inside the write tools (env/invariants.py);
+- injected backend faults (env/faults.py), raised from execute_tool;
+- idempotency keys: a write retried with the same key returns the first result and writes
+  nothing.
 """
 
 import json
@@ -23,8 +29,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from arl.env import invariants
+from arl.env.faults import raise_fault
 from arl.env.seed import SIM_TODAY
-from arl.env.store import dollars
+from arl.env.store import dollars, env_of
 from arl.llm.types import ToolSpec
 
 MAX_ORDERS = 20
@@ -150,7 +158,11 @@ def get_order(conn: sqlite3.Connection, args: GetOrderArgs) -> dict:
         "ORDER BY id",
         (order_id,),
     ).fetchall()
-    return {
+    notes = conn.execute(
+        "SELECT source, body, created_at FROM order_notes WHERE order_id = ? ORDER BY id",
+        (order_id,),
+    ).fetchall()
+    result = {
         "order": {
             "id": order["id"],
             "customer_id": order["customer_id"],
@@ -169,6 +181,9 @@ def get_order(conn: sqlite3.Connection, args: GetOrderArgs) -> dict:
             ],
         }
     }
+    if notes:   # only when there are any, so results for orders without notes are unchanged
+        result["order"]["notes"] = [dict(n) for n in notes]
+    return result
 
 
 def list_orders(conn: sqlite3.Connection, args: ListOrdersArgs) -> dict:
@@ -272,6 +287,8 @@ def issue_refund(conn: sqlite3.Connection, args: IssueRefundArgs) -> dict:
     if cents <= 0:
         return _error("invalid_amount",
                       f"The refund amount must be more than 0.00; got {args.amount_usd}.")
+    if problem := invariants.check(conn, "issue_refund", order, cents=cents):
+        return problem
     refund_id = _next_id(conn, "refunds", "REF", 9001)
     conn.execute(
         "INSERT INTO refunds VALUES (?, ?, ?, ?, 'issued', ?)",
@@ -299,6 +316,8 @@ def cancel_order(conn: sqlite3.Connection, args: CancelOrderArgs) -> dict:
     if order["status"] == "cancelled":
         return _error("already_cancelled",
                       f"Order {order['id']} is already cancelled. Nothing was changed.")
+    if problem := invariants.check(conn, "cancel_order", order):
+        return problem
     conn.execute("UPDATE orders SET status = 'cancelled', cancel_reason = ? WHERE id = ?",
                  (args.reason, order["id"]))
     conn.commit()
@@ -313,6 +332,8 @@ def update_shipping_address(conn: sqlite3.Connection, args: UpdateShippingAddres
         return _order_not_found(args.order_id)
     if order["status"] == "cancelled":
         return _order_cancelled(order["id"], "have its address changed")
+    if problem := invariants.check(conn, "update_shipping_address", order):
+        return problem
     address = f"{args.street.strip()}, {args.city.strip()}, {args.state} {args.postal_code}"
     conn.execute("UPDATE orders SET shipping_address = ? WHERE id = ?", (address, order["id"]))
     conn.commit()
@@ -327,6 +348,8 @@ def create_return(conn: sqlite3.Connection, args: CreateReturnArgs) -> dict:
         return _order_not_found(args.order_id)
     if order["status"] == "cancelled":
         return _order_cancelled(order["id"], "have a return")
+    if problem := invariants.check(conn, "create_return", order):
+        return problem
     sku = args.sku.strip().upper()
     items = conn.execute(
         "SELECT sku, quantity FROM items WHERE order_id = ? ORDER BY id", (order["id"],)
@@ -572,8 +595,48 @@ def tool_specs() -> list[ToolSpec]:
 
 # --- Execution ---------------------------------------------------------------------
 
-def execute_tool(conn: sqlite3.Connection, name: str, arguments: str) -> dict:
-    """Run one tool call. `arguments` is the JSON string exactly as the model sent it."""
+IDEMPOTENCY_TABLE = "idempotency"
+
+
+def _with_key(conn: sqlite3.Connection, tool: Tool, args: BaseModel, key: str) -> dict:
+    """Run a write at most once per key.
+
+    The key row is inserted in the same transaction as the write, so the tool's own commit
+    stores both or neither. A second call with the key returns the first result. The table
+    is TEMP: it is not in sqlite_master, so it is not part of the store's end state.
+    """
+    conn.execute(f"CREATE TEMP TABLE IF NOT EXISTS {IDEMPOTENCY_TABLE} "
+                 "(id TEXT PRIMARY KEY, tool TEXT NOT NULL, result TEXT)")
+    row = conn.execute(f"SELECT tool, result FROM {IDEMPOTENCY_TABLE} WHERE id = ?",
+                       (key,)).fetchone()
+    if row is not None:
+        first = json.loads(row["result"]) if row["result"] else {
+            "note": "This call was already made; its result was not recorded."}
+        return {**first, "replayed": True}
+    conn.execute(f"INSERT INTO {IDEMPOTENCY_TABLE} (id, tool, result) VALUES (?, ?, NULL)",
+                 (key, tool.name))
+    try:
+        result = tool.fn(conn, args)
+    except Exception:
+        conn.rollback()
+        raise
+    if "error" in result:   # nothing was written, so the key is released for a corrected call
+        conn.execute(f"DELETE FROM {IDEMPOTENCY_TABLE} WHERE id = ?", (key,))
+    else:
+        conn.execute(f"UPDATE {IDEMPOTENCY_TABLE} SET result = ? WHERE id = ?",
+                     (json.dumps(result), key))
+    conn.commit()
+    return result
+
+
+def execute_tool(conn: sqlite3.Connection, name: str, arguments: str, *,
+                 idempotency_key: str | None = None) -> dict:
+    """Run one tool call. `arguments` is the JSON string exactly as the model sent it.
+
+    `idempotency_key` applies to write and escalate tools. An injected fault is raised as
+    a `ToolFault`: before the tool runs (timeout, unavailable) or after it has committed
+    (after_commit).
+    """
     tool = _BY_NAME.get(name)
     if tool is None:
         return _error("unknown_tool", f"There is no tool named '{name}'.")
@@ -591,4 +654,14 @@ def execute_tool(conn: sqlite3.Connection, name: str, arguments: str) -> dict:
         )
         return _error("invalid_arguments",
                       f"The arguments do not match the schema. {problems}. Nothing was changed.")
-    return tool.fn(conn, args)
+    faults = env_of(conn).faults
+    fault = faults.next_fault(name) if faults is not None else None
+    if fault in ("timeout", "unavailable"):
+        raise_fault(fault, name)
+    if idempotency_key and tool.kind != "read":
+        result = _with_key(conn, tool, args, idempotency_key)
+    else:
+        result = tool.fn(conn, args)
+    if fault == "after_commit":
+        raise_fault("timeout", name)
+    return result

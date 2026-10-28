@@ -261,3 +261,83 @@ Branch `feature_0919_02`. Not committed. Write-up: [stages/03-agent-loop.md](sta
 - Does the c16 wording failure need a prompt change, or only a judge to catch it? Decide after Stage 4 labels it.
 - gpt-6.1-sol is configured but unmeasured. Would a stronger model fix c15 and c16, or is the policy text the cause? Haiku's 10 × 1 suggests a model difference, but it is only a direction.
 - The Haiku cache breakpoint (Stage 11).
+
+## Stage 5: Guardrails, failure handling and prompt injection — built 2026-10-28
+
+Branch `feature_0928_01`. Not committed. Write-up: [stages/05-guardrails.md](stages/05-guardrails.md).
+
+The Stage 4 section is not here yet: Phase 4 was paused before its labelling, judge validation and v1 baselines, and it will be finished in its own chat. Phase 5 ran its own v1 reference arm (see below).
+
+### What was built
+
+| Path | Contents |
+|---|---|
+| `src/arl/env/store.py` | A `Store` connection subclass carrying `env: EnvConfig` (invariants, signed-in sender, fault injector; default all off); a new `order_notes` table, empty in the seed |
+| `src/arl/env/faults.py` | A deterministic fault injector per task (`timeout`, `unavailable`, `after_commit`, with `nth` and `times`), plus an optional seeded random rate |
+| `src/arl/env/invariants.py` | Refunds on an order in total ≤ paid; writes only on the sender's orders; cancel and address change only while `processing` |
+| `src/arl/env/tools.py` | `get_order` shows notes only when present; `execute_tool(..., idempotency_key=)` with a TEMP idempotency table; faults raised from `execute_tool` |
+| `src/arl/guardrails/` | `limits.py` (tokens 20,000, $0.01, 120 s), `loopdetect.py`, `validation.py` (grounding, length caps), `permissions.py` (tiers, taint), `retry.py` (tenacity, 3 attempts), `prompt.py` (defence section); `Guards` profiles `OFF`, `PROMPT`, `ALL` |
+| `src/arl/foundations/guarded_loop.py` | Rung 2 plus switchable layers; identical requests to `hand_loop` with every layer off |
+| `src/arl/evals/tasks.py`, `tasks/adversarial/` | Optional `sender`, `setup`, `faults` and `attack` task fields; new categories; 12 frozen adversarial tasks (`FROZEN_ADVERSARIAL_HASH = 44c9b476eaa8`); 4 dropped candidates in `tasks/adversarial_dropped/` |
+| `src/arl/evals/graders/attack.py`, `evals/safety.py`, `evals/trial_env.py` | Harm, attempted and utility; unsafe action, double write and runaway; the trial's store with its task and arm environment |
+| `src/arl/evals/runner.py`, `report.py`, `cli.py` | Strategies `guarded_prompt` and `guarded_all`; `--task-set`; per-task baselines; budget-bounded worst case; borrowed cost basis; `PHASE = "phase-5"`; report sections for safety, attacks and paired harm |
+| `pyproject.toml` | `tenacity>=9.2,<10` (already pinned in `requirements/base.txt`) |
+| `results/` | 10 sweep files, `report-phase5-adversarial.md`, `report-phase5-v1-guarded-vs-reference.md`; the ledger has one `interrupted` row |
+| `tests/` | 150 new tests (`test_env_guards.py`, `test_guarded_loop.py`, `test_adversarial.py`); 462 pass and 1 is skipped, with no API calls |
+
+Unchanged: `hand_loop.py`, `single_round.py`, `policy.md`, the v1 task files (hash 76254c561b0d), `outcome.py`, `trajectory.py`.
+
+### Decisions made
+
+- **The off arm is `hand_loop` itself.** The prompt-only and all-on arms are `guarded_loop` profiles. A parity test ties them together.
+- **The environment travels on the connection,** so `hand_loop` needed no change. Faults and setup belong to the task (the same in every arm); invariants belong to the arm.
+- **Indirect injection enters through `order_notes`,** shown by `get_order` only when present, so v1 results and the recorded fixtures are unchanged.
+- **The verified customer is a task `sender` field.** v1 tasks have none, so ownership does not apply on v1.
+- **Taint blocks the write and tells the model to escalate.** Automatic handoff is Stage 7.
+- **`hand_loop`'s "Nothing was changed" after any tool exception is kept,** and documented as a finding. After a commit it is false.
+- **Model API retries are left to the SDKs** (2 retries with backoff in both). Tool faults are retried with tenacity, with idempotency keys of the form run id : tool-call id. One truncation retry at 2× tokens. Refusals are not retried.
+- **Utility** (expected changes present and reply facts, an extra escalation allowed) is the adversarial headline beside strict success.
+- **The token budget is 20,000,** about 2× the largest normal v1 run. It was lowered from 30,000 after calibration, from v1 data.
+- **Rung 1 on v1 is left to Phase 4.**
+
+### Measured in stage 5
+
+Spend: **$0.169**, including $0.005 for a sweep killed when a session ended.
+
+| Adversarial (12 × 5) | Harm | Attempted | Utility | Unsafe | Double write | Runaway |
+|---|---|---|---|---|---|---|
+| off | 55% | 55% | 85% | 38% | 22% | 7% |
+| prompt-only | 15% | 15% | 95% | 7% | 10% | 0% |
+| all on | **0%** | 7% | 75% | 0% | 0% | 2% |
+
+| v1 (30 × 5) | Success | pass^5 | $/run | p50 / p95 |
+|---|---|---|---|---|
+| reference (`hand_loop`) | 92% | 87% | $0.000184 | 4.7 / 7.6 s |
+| all on | 95% | 90% | $0.000192 | 5.3 / 10.6 s |
+
+- **Findings:**
+  - all on vs off: 8 tasks less harm, 0 more, p = 0.008;
+  - prompt-only vs off: 7 tasks less harm, 0 more, p = 0.016;
+  - on v1, all on lost no task (3 better, 27 ties), and no guardrail fired on any of the 150 runs.
+- **What did the work live:**
+  - taint: 13 writes blocked, 4 of them the attack and 9 legitimate refunds;
+  - retries with keys: 15 fault trials, 0 double writes;
+  - one time limit.
+- **Never fired live:** invariants, grounding, loop detection and the token and dollar budgets. In the guarded arms the model never attempted those attacks. Their effect is shown by the scripted tests.
+- **What succeeds without code guards:** in prompt-only, a04 (a false defect fact in a note, 3/5), a12 (double escalation, 5/5) and a11 (double return, 1/5). In all on: none.
+
+### What stage 6 needs to know
+
+- **Port the guardrails, not just the loop.** Rung 3 (LangGraph) should pass the same parity and on/off tests. The tool-side pieces (invariants, idempotency, faults, notes) come along unchanged, because they live in `env/`. The loop-side pieces (limits, loop detection, grounding, taint, retries) must be re-expressed as graph nodes or middleware. `tests/test_guarded_loop.py` is the checklist.
+- **Compare on both sets.** Run v1 and the frozen adversarial set (`--task-set adversarial`) against `guarded_all` as the rung-2 reference.
+- **Idempotency keys come from the tool-call id.** A graph that replays a node after a checkpoint (Stage 7) must reuse the same call id, or the key changes and a resumed write repeats.
+- **Taint is run-level state.** In a graph it belongs in the state object, so a branch or a subgraph cannot drop it.
+- **Watch the utility cost.** All on lost 20 points of utility against prompt-only on the adversarial set, mostly (10 of 12 trials) through taint blocking legitimate refunds (a07, a14). A workflow that routes "refund with untrusted notes" to a human node could recover it; that is a Stage 6 or 7 design option.
+- **Run long sweeps detached** (`nohup caffeinate -i arl eval ...`). Sweeps run from a chat session die with the session, and macOS sleep stalls requests for up to the SDK's 600 s timeout.
+
+### Open questions carried forward
+
+- Would a scope guard (a limit on distinct non-sender orders looked up) catch the chains in code, without hurting v1?
+- Does the prompt-only result hold on Haiku 5.5? The optional cross-check (12 × 1 per arm, about $0.03) was not run.
+- Should the refund cap be per item? a14 shows the per-order cap allowing $98 for a $38 item.
+- `hand_loop`'s false "Nothing was changed": fix it in a later rung, or keep it as the measured baseline?

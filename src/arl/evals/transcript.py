@@ -105,17 +105,19 @@ class Transcript:
         return cls(**fields, turns=turns, tool_calls=calls)
 
 
-def replay_reference(task) -> Transcript:
+def replay_reference(task, *, invariants: bool = False) -> Transcript:
     """Run a task's reference solution against a fresh store, with no model.
 
     Each reference turn's calls are executed as a batch, the way the agent's tool calls
-    are, so the transcript has the same shape a live run would.
+    are, so the transcript has the same shape a live run would. The store has the task's
+    setup; its faults are left out (the reference is the intended run), and the invariants
+    are on only if asked.
     """
-    from arl.env.seed import new_store
     from arl.env.tools import execute_tool
     from arl.evals.dbdiff import diff, snapshot
+    from arl.evals.trial_env import trial_store
 
-    conn = new_store()
+    conn = trial_store(task, invariants=invariants, faults=False)
     before = snapshot(conn)
     calls = []
     for index, batch in enumerate(task.reference.turns, start=1):

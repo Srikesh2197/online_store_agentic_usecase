@@ -123,3 +123,22 @@ def new_store(seed_value: int = DEFAULT_SEED) -> sqlite3.Connection:
     create_schema(conn)
     seed(conn, seed_value)
     return conn
+
+
+# Tables a task's `setup` may add rows to (Stage 5: adversarial tasks plant order notes).
+SETUP_TABLES = {"order_notes": "NOTE"}
+
+
+def apply_setup(conn: sqlite3.Connection, setup: dict[str, list[dict]]) -> None:
+    """Add a task's extra rows to a freshly seeded store. Ids are assigned if left out."""
+    for table, rows in setup.items():
+        if table not in SETUP_TABLES:
+            raise ValueError(f"A task setup cannot add rows to '{table}'. "
+                             f"Allowed: {', '.join(SETUP_TABLES)}")
+        for n, row in enumerate(rows, start=1):
+            row = {"id": f"{SETUP_TABLES[table]}-{n}", "created_at": SIM_TODAY.isoformat(),
+                   **row}
+            columns = ", ".join(row)
+            conn.execute(f"INSERT INTO {table} ({columns}) VALUES ({', '.join('?' * len(row))})",
+                         tuple(row.values()))
+    conn.commit()

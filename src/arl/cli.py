@@ -43,7 +43,8 @@ def _echo(title: str, payload: object) -> None:
     typer.echo(json.dumps(_shorten_blobs(payload), indent=2))
 
 
-STRATEGY_HELP = "single_round (rung 1) or hand_loop (rung 2)."
+STRATEGY_HELP = ("single_round (rung 1), hand_loop (rung 2), or rung 2 with guardrails: "
+                 "guarded_prompt (prompt-only defence) or guarded_all (every guardrail).")
 
 
 def _strategy(name: str):
@@ -76,11 +77,14 @@ def run(
 ) -> None:
     """Run one ticket through a strategy and print what went over the wire."""
     from arl.env.seed import new_store
+    from arl.env.store import EnvConfig
     from arl.llm import make_adapter
     from arl.llm.pricing import load_models
     from arl.tracing.tracer import Tracer, langfuse_client, new_run_id
 
     plan = _strategy(strategy)
+    conn = new_store()
+    conn.env = EnvConfig(invariants=plan.invariants)
     ticket_id, text = _load_ticket(ticket)
     adapter = make_adapter(model or load_models()["default"])
     tracer = Tracer(new_run_id(ticket_id), langfuse=langfuse_client())
@@ -88,7 +92,7 @@ def run(
     result = plan.run(
         text,
         ticket_id=ticket_id,
-        conn=new_store(),
+        conn=conn,
         adapter=adapter,
         tracer=tracer,
         echo=(lambda title, payload: None) if quiet else _echo,
@@ -118,6 +122,8 @@ def eval_(
     trials: int = typer.Option(5, "--trials", "-k", min=1, help="Trials per task."),
     tasks: str = typer.Option("all", "--tasks",
                               help="all, a category (read/write/refuse/escalate), or ids: c01,c07"),
+    task_set: str = typer.Option("capability", "--task-set",
+                                 help="capability (v1) or adversarial (Stage 5)."),
     cap: float = typer.Option(0.50, "--cap", help="Hard cost cap for this sweep, in US dollars."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the estimate and stop."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask before spending."),
@@ -133,19 +139,24 @@ def eval_(
     plan = _strategy(strategy)
     model = model or load_models()["default"]
     try:
-        chosen = select(load_tasks(), tasks)
+        chosen = select(load_tasks(task_set), tasks)
+    except FileNotFoundError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--task-set") from exc
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--tasks") from exc
     est = runner.estimate(chosen, model, trials, strategy=plan.name)
     spent = runner.phase_spent()
+    worst_basis = (f"the ${plan.max_usd:.4f} per-run budget plus 3 calls past it"
+                   if plan.max_usd else
+                   f"{plan.max_calls} calls, every one at max_tokens, no cache")
     typer.secho("===== ESTIMATE =====", bold=True)
     typer.echo(
-        f"sweep:     {plan.name} · {model} · {len(chosen)} tasks × {trials} trials "
+        f"sweep:     {plan.name} · {model} · {task_set} · {len(chosen)} tasks × {trials} trials "
         f"= {est.trials} trials\n"
         f"expected:  ${est.expected_usd:.4f}  (${est.per_trial_expected:.6f} per trial; "
         f"{est.basis})\n"
         f"worst:     ${est.worst_usd:.4f}  (${est.per_trial_worst:.6f} per trial: "
-        f"{plan.max_calls} calls, every one at max_tokens, no cache)\n"
+        f"{worst_basis})\n"
         f"cap:       ${cap:.4f}  (the sweep halts before any trial whose worst case would "
         f"cross it)\n"
         f"{runner.PHASE} spent so far: ${spent:.4f} of about ${runner.PHASE_BUDGET_USD:.2f}"
@@ -164,6 +175,10 @@ def eval_(
     def progress(record: dict, total: float) -> None:
         result = {True: "pass", False: "FAIL", None: "ERROR"}[record["success"]]
         failed = [c["name"] for c in record["verdict"]["checks"] if not c["passed"]]
+        attack = record.get("attack")
+        if attack:
+            failed.insert(0, "HARM" if attack["harmed"] else
+                          "attempted" if attack["attempted"] else "resisted")
         typer.echo(f"{record['task_id']:<30} k{record['trial']}  {result:<5} "
                    f"${record['cost_usd']:.6f}  {(record['latency_ms'] or 0) / 1000:5.1f}s  "
                    f"total ${total:.4f}  {', '.join(failed)}"
@@ -172,7 +187,7 @@ def eval_(
     doc = runner.run_sweep(chosen, adapter=make_adapter(model), trials_per_task=trials,
                            cap_usd=cap, est=est,
                            langfuse=langfuse_client() if langfuse else None, progress=progress,
-                           strategy=plan.name)
+                           strategy=plan.name, task_set=task_set)
     typer.secho(f"\n===== {doc['status'].upper()} =====", bold=True)
     typer.echo(report.summary_table([doc]))
     typer.echo(f"\nresults: results/{doc['sweep_id']}.json   spent: ${doc['spent_usd']:.4f}")

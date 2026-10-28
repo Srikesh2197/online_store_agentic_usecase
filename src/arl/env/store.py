@@ -1,9 +1,15 @@
 """The simulated store: a SQLite database.
 
 Money is stored as integer cents. Dates are ISO strings (YYYY-MM-DD).
+
+A connection carries `env`, the settings of the world for one trial: which tool faults to
+inject, whether the write tools enforce the policy invariants, and who the signed-in sender
+is. The default is everything off, which is the store as it was before Stage 5. The agent
+loop never sees `env`; only the tools read it.
 """
 
 import sqlite3
+from dataclasses import dataclass
 
 SCHEMA = """
 CREATE TABLE customers (
@@ -65,6 +71,17 @@ CREATE TABLE returns (
     created_at  TEXT NOT NULL
 );
 
+-- Free text attached to an order by someone other than the agent: the customer at checkout,
+-- the carrier or the warehouse. get_order shows it only when a note exists. It is the
+-- channel for indirect prompt injection (Stage 5); the v1 seed has no notes.
+CREATE TABLE order_notes (
+    id          TEXT PRIMARY KEY,           -- NOTE-1
+    order_id    TEXT NOT NULL REFERENCES orders(id),
+    source      TEXT NOT NULL CHECK (source IN ('customer', 'carrier', 'warehouse')),
+    body        TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
 -- A handoff to a person. Kept in the database so an escalation is part of the end state.
 CREATE TABLE escalations (
     id           TEXT PRIMARY KEY,          -- ESC-3001
@@ -79,8 +96,25 @@ CREATE TABLE escalations (
 """
 
 
+@dataclass(frozen=True)
+class EnvConfig:
+    invariants: bool = False                 # write tools enforce the policy invariants
+    sender_customer_id: str | None = None    # the signed-in sender, if the ticket has one
+    faults: object | None = None             # an env.faults.FaultInjector, or None
+
+
+class Store(sqlite3.Connection):
+    """A SQLite connection that carries the trial's environment settings."""
+
+    env: EnvConfig = EnvConfig()
+
+
+def env_of(conn: sqlite3.Connection) -> EnvConfig:
+    return getattr(conn, "env", Store.env)
+
+
 def connect(path: str = ":memory:") -> sqlite3.Connection:
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, factory=Store)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn

@@ -5,9 +5,10 @@
     cap        before each trial, stop if the worst case of that trial could cross the cap
     record     one results JSON per sweep and one ledger row, written even on a halt
 
-The agent under test is a strategy: rung 1 (`single_round`) or rung 2 (`hand_loop`), each
-unchanged. The runner only gives it a fresh store and a tracer, and afterwards records what
-the store looks like.
+The agent under test is a strategy: rung 1 (`single_round`), rung 2 (`hand_loop`), each
+unchanged, or rung 2 with guardrails (`guarded_prompt`, `guarded_all`, Stage 5). The runner
+gives it a fresh store with the task's environment (its setup, faults and sender, and the
+arm's invariants) and a tracer, and afterwards records what the store looks like.
 """
 
 import csv
@@ -17,21 +18,27 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 
 from arl import ROOT
-from arl.env.seed import new_store
+from arl.env.store import env_of
 from arl.env.tools import tool_specs
 from arl.evals.dbdiff import diff, snapshot
 from arl.evals.graders import grade
+from arl.evals.graders.attack import grade_attack
+from arl.evals.safety import safety
 from arl.evals.tasks import DEFAULT_SET, Task, task_set_hash
 from arl.evals.transcript import Transcript
+from arl.evals.trial_env import trial_store
+from arl.foundations.guarded_loop import run_guarded_loop
 from arl.foundations.hand_loop import MAX_STEPS, run_hand_loop
 from arl.foundations.single_round import (
     MAX_OUTPUT_TOKENS,
     build_instructions,
     run_single_round,
 )
+from arl.guardrails import PROFILES
 from arl.llm.pricing import model_entry, price_for
 from arl.llm.types import Message, Text
 from arl.tracing.tracer import RUNS_DIR, Tracer, read_events
@@ -39,7 +46,7 @@ from arl.tracing.tracer import RUNS_DIR, Tracer, read_events
 RESULTS_DIR = ROOT / "results"
 LEDGER_NAME = "spend.csv"
 EVAL_RUNS_DIR = RUNS_DIR / "eval"
-PHASE = "phase-4"
+PHASE = "phase-5"
 PHASE_BUDGET_USD = 1.00
 
 
@@ -49,11 +56,25 @@ class Strategy:
     run: Callable
     max_calls: int     # model calls a trial can make at most: the basis of the worst case
     prior_calls: int   # model calls a trial is expected to make, until one has been measured
+    invariants: bool = False       # the write tools enforce the policy invariants (Stage 5)
+    cost_basis: str | None = None  # another strategy whose measured cost to borrow until
+                                   # this one has its own
+    max_usd: float | None = None   # a per-run dollar budget, which bounds the worst case
+
+
+def _guarded(profile: str, **fields) -> Strategy:
+    guards = PROFILES[profile]
+    return Strategy(profile, partial(run_guarded_loop, guards=guards),
+                    max_calls=MAX_STEPS + (1 if guards.truncation_retry else 0), prior_calls=4,
+                    invariants=guards.invariants, cost_basis="hand_loop",
+                    max_usd=guards.limits.max_usd if guards.limits else None, **fields)
 
 
 STRATEGIES = {
     "single_round": Strategy("single_round", run_single_round, max_calls=2, prior_calls=2),
     "hand_loop": Strategy("hand_loop", run_hand_loop, max_calls=MAX_STEPS, prior_calls=4),
+    "guarded_prompt": _guarded("guarded_prompt"),
+    "guarded_all": _guarded("guarded_all"),
 }
 DEFAULT_STRATEGY = "single_round"
 # Request characters per input token, measured from the recorded t1 bodies in
@@ -143,10 +164,23 @@ def estimate(tasks: list[Task], model: str, trials_per_task: int,
                              for t in tasks)
     input_price = max(price.input, price.cache_write or 0.0)   # no cache discount assumed
     worst = worst_trial_cost(tokens, input_price, price.output, plan.max_calls)
+    if plan.max_usd is not None:
+        # The budget is checked before each call, so a run can pass it by one call, then
+        # make the reply-only call and at most one truncation retry: three calls at the
+        # largest history.
+        last_call = (worst_trial_cost(tokens, input_price, price.output, plan.max_calls)
+                     - worst_trial_cost(tokens, input_price, price.output, plan.max_calls - 1))
+        worst = min(worst, plan.max_usd + 3 * last_call)
     measured = measured_trial_costs(model, results_dir, strategy)
+    borrowed = (measured_trial_costs(model, results_dir, plan.cost_basis)
+                if not measured and plan.cost_basis else [])
     if measured:
         expected = statistics.mean(measured)
         basis = f"measured: mean of {len(measured)} earlier {strategy} trials of {model}"
+    elif borrowed:
+        expected = statistics.mean(borrowed)
+        basis = (f"borrowed: mean of {len(borrowed)} earlier {plan.cost_basis} trials of "
+                 f"{model} (same loop; none of {strategy} measured yet)")
     else:
         expected = plan.prior_calls * (tokens * input_price
                                        + PRIOR_OUTPUT_TOKENS_PER_CALL * price.output) / 1e6
@@ -196,17 +230,17 @@ def git_commit() -> str:
 
 # --- Trials --------------------------------------------------------------------------
 
-_BASELINE: dict | None = None
+_BASELINES: dict[str, dict] = {}
 
 
-def _baseline() -> dict:
-    """The seeded store before any run. The seed is deterministic, so it is computed once."""
-    global _BASELINE
-    if _BASELINE is None:
-        conn = new_store()
-        _BASELINE = snapshot(conn)
+def _baseline(task: Task) -> dict:
+    """The store before the run: seeded, plus the task's setup. Deterministic, so cached."""
+    key = json.dumps(task.setup, sort_keys=True)
+    if key not in _BASELINES:
+        conn = trial_store(task, faults=False)
+        _BASELINES[key] = snapshot(conn)
         conn.close()
-    return _BASELINE
+    return _BASELINES[key]
 
 
 def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
@@ -214,15 +248,18 @@ def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
     """One attempt at one task. API failures become an error trial; Ctrl-C propagates."""
     run_id = f"{sweep_id}-{task.id}-k{trial}"
     tracer = Tracer(run_id, log_dir=Path(runs_dir) / sweep_id, langfuse=langfuse, phase=PHASE)
-    conn = new_store()
+    plan = STRATEGIES[strategy]
+    conn = trial_store(task, invariants=plan.invariants)
     error = None
     try:
-        STRATEGIES[strategy].run(task.ticket.strip(), ticket_id=task.id, conn=conn,
-                                 adapter=adapter, tracer=tracer)
+        plan.run(task.ticket.strip(), ticket_id=task.id, conn=conn, adapter=adapter,
+                 tracer=tracer)
     except Exception as exc:  # noqa: BLE001 -- an API or harness failure, not a wrong answer
         error = f"{type(exc).__name__}: {exc}"
     finally:
-        tracer.event("end_state", db_diff=diff(_baseline(), snapshot(conn)))
+        faults = env_of(conn).faults
+        tracer.event("end_state", db_diff=diff(_baseline(task), snapshot(conn)),
+                     **({"faults_fired": faults.fired} if faults else {}))
         conn.close()
     events = read_events(tracer.path)
     if any(e["type"] == "run_start" for e in events):
@@ -233,6 +270,7 @@ def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
     if error and not transcript.error:
         transcript = replace(transcript, error=error)
     verdict = grade(task, transcript)
+    attack = grade_attack(task, transcript)
     return {
         "task_id": task.id,
         "category": task.category,
@@ -250,6 +288,8 @@ def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
         "stop": transcript.stop,
         "max_tokens_endings": sum(1 for t in transcript.turns if t.stop == "max_tokens"),
         "verdict": verdict.to_dict(),
+        "attack": attack.to_dict() if attack else None,
+        "safety": safety(task, transcript).to_dict(),
         "transcript": transcript.to_dict(),
     }
 

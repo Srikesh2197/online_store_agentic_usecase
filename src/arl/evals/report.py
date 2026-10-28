@@ -15,7 +15,9 @@ from math import comb
 from pathlib import Path
 
 from arl.evals.graders import GROUPS, Verdict, grade
-from arl.evals.tasks import by_id, load_tasks, task_set_hash
+from arl.evals.graders.attack import grade_attack
+from arl.evals.safety import safety
+from arl.evals.tasks import ADVERSARIAL_CATEGORIES, by_id, load_tasks, task_set_hash
 from arl.evals.transcript import Transcript
 
 CATEGORIES = ("read", "write", "refuse", "escalate")
@@ -183,6 +185,9 @@ def summary_table(docs: list[dict]) -> str:
 
 
 def category_table(docs: list[dict]) -> str:
+    present = {t["category"] for d in docs for t in d["trials"]}
+    categories = (CATEGORIES if not present & set(ADVERSARIAL_CATEGORIES)
+                  else tuple(c for c in CATEGORIES + ADVERSARIAL_CATEGORIES if c in present))
     rows = []
     for doc in docs:
         by_cat = defaultdict(list)
@@ -191,8 +196,8 @@ def category_table(docs: list[dict]) -> str:
                 by_cat[t["category"]].append(bool(t["success"]))
         rows.append([arm_name(doc)] + [
             f"{_pct(statistics.mean(by_cat[c]))} ({len(by_cat[c])})" if by_cat[c] else "–"
-            for c in CATEGORIES])
-    return _table(["arm", *(f"{c} (trials)" for c in CATEGORIES)], rows)
+            for c in categories])
+    return _table(["arm", *(f"{c} (trials)" for c in categories)], rows)
 
 
 def variance_table(doc: dict) -> str:
@@ -324,6 +329,149 @@ def disagreements(doc: dict, limit: int = 20) -> str:
                   rows[:limit]) + more
 
 
+# --- Stage 5: attacks and safety ---------------------------------------------------------
+
+def graded_trials(doc: dict) -> list[dict]:
+    """Every graded trial with its attack verdict and safety counts, recomputed from the
+    stored transcript against the task files, so --regrade covers them too."""
+    tasks = by_id(load_tasks(doc["task_set"]))
+    out = []
+    for t in doc["trials"]:
+        if t["success"] is None or t["task_id"] not in tasks:
+            continue
+        task, tr = tasks[t["task_id"]], Transcript.from_dict(t["transcript"])
+        out.append({"trial": t, "task": task, "attack": grade_attack(task, tr),
+                    "safety": safety(task, tr)})
+    return out
+
+
+def _rate(hits: int, n: int) -> str:
+    from arl.evals.judge_validation import wilson
+
+    if not n:
+        return "–"
+    ci = wilson(hits, n)
+    return f"{100 * hits / n:.0f}% ({hits}/{n}; {100 * ci[0]:.0f}–{100 * ci[1]:.0f})"
+
+
+def is_adversarial(doc: dict) -> bool:
+    return any(t["category"] in ADVERSARIAL_CATEGORIES for t in doc["trials"])
+
+
+def attack_table(docs: list[dict]) -> str:
+    """Per arm: how often attacks landed, were tried, and how often the real request was done."""
+    rows = []
+    for doc in [d for d in docs if is_adversarial(d)]:
+        g = graded_trials(doc)
+        n = len(g)
+        harmed = sum(x["attack"].harmed for x in g)
+        tried = sum(x["attack"].attempted for x in g)
+        rows.append([
+            arm_name(doc), n, _rate(harmed, n), _rate(tried, n),
+            f"{tried - harmed}", _rate(sum(x["attack"].utility for x in g), n),
+            _rate(sum(bool(x["trial"]["success"]) for x in g), n),
+            f"{statistics.mean(x['trial']['model_calls'] for x in g):.2f}" if g else "–",
+            f"{statistics.mean(x['trial']['cost_usd'] for x in g):.6f}" if g else "–",
+        ])
+    return _table(["arm", "trials", "attack success (harm), 95% CI", "attempted (took the bait)",
+                   "caught (attempted, no harm)", "utility (legitimate request done)",
+                   "strict success",
+                   "model calls/run", "$/run"], rows)
+
+
+def attack_category_table(docs: list[dict]) -> str:
+    rows = []
+    for doc in [d for d in docs if is_adversarial(d)]:
+        by_cat = defaultdict(list)
+        for x in graded_trials(doc):
+            by_cat[x["task"].category].append(x["attack"].harmed)
+        rows.append([arm_name(doc)] + [
+            f"{_pct(statistics.mean(by_cat[c]))} ({sum(by_cat[c])}/{len(by_cat[c])})"
+            if by_cat[c] else "–" for c in ADVERSARIAL_CATEGORIES])
+    return _table(["arm (harm rate)", *ADVERSARIAL_CATEGORIES], rows)
+
+
+def attack_task_table(docs: list[dict]) -> str:
+    """Per task and arm: harm / attempted / utility, out of the graded trials."""
+    docs = [d for d in docs if is_adversarial(d)]
+    cells: dict[str, dict[str, str]] = defaultdict(dict)
+    categories = {}
+    for doc in docs:
+        by_task = defaultdict(list)
+        for x in graded_trials(doc):
+            by_task[x["task"].id].append(x)
+            categories[x["task"].id] = x["task"].category
+        for task_id, xs in by_task.items():
+            n = len(xs)
+            cells[task_id][arm_name(doc)] = (
+                f"{sum(x['attack'].harmed for x in xs)} / {sum(x['attack'].attempted for x in xs)}"
+                f" / {sum(x['attack'].utility for x in xs)} of {n}")
+    order = [t for d in docs for t in d["task_ids"]]
+    task_ids = list(dict.fromkeys(t for t in order if t in cells))
+    rows = [[t, categories[t], *(cells[t].get(arm_name(d), "–") for d in docs)] for t in task_ids]
+    return _table(["task", "category", *(f"{arm_name(d)}: harm / tried / utility" for d in docs)],
+                  rows)
+
+
+def paired_harm_table(a: dict, b: dict) -> str:
+    """Arm A against arm B on each task's harm rate. Lower harm is better."""
+    def harm_by_task(doc):
+        out = defaultdict(list)
+        for x in graded_trials(doc):
+            out[x["task"].id].append(x["attack"].harmed)
+        return out
+
+    k = min(a["trials_per_task"], b["trials_per_task"])
+    ha, hb = harm_by_task(first_trials(a, k)), harm_by_task(first_trials(b, k))
+    rows, wins, losses, ties = [], 0, 0, 0
+    for task_id in [t for t in a["task_ids"] if ha.get(t) and hb.get(t)]:
+        ra, rb = statistics.mean(ha[task_id]), statistics.mean(hb[task_id])
+        better = "A" if ra < rb else "B" if rb < ra else "tie"
+        wins, losses, ties = wins + (better == "A"), losses + (better == "B"), ties + (better == "tie")
+        rows.append([task_id, f"{sum(ha[task_id])}/{len(ha[task_id])}",
+                     f"{sum(hb[task_id])}/{len(hb[task_id])}", better])
+    p = sign_test_p(wins, losses)
+    m = min_one_sided_tasks()
+    verdict = "a finding" if p < SIGNIFICANCE else "a direction, not a finding"
+    return (_table(["task", "A harm", "B harm", "less harm"], rows) +
+            f"\nA = {arm_name(a)}, B = {arm_name(b)}. Less harm in A on {wins} tasks, in B on "
+            f"{losses}, tied on {ties}. Two-sided sign test p = {p:.3f}: {verdict}. At least {m} "
+            f"differing tasks, all one way, are needed for p < {SIGNIFICANCE}.")
+
+
+def still_succeeding(docs: list[dict]) -> str:
+    """The attacks that landed at least once, per arm, with one example of how."""
+    lines = []
+    for doc in [d for d in docs if is_adversarial(d)]:
+        landed = defaultdict(list)
+        for x in graded_trials(doc):
+            if x["attack"].harmed:
+                landed[x["task"].id].append(x)
+        lines.append(f"- **{arm_name(doc)}**: " + ("none" if not landed else "; ".join(
+            f"{task_id} {len(xs)}× ({xs[0]['task'].attack.goal}: {xs[0]['attack'].detail})"
+            for task_id, xs in landed.items())))
+    return "\n".join(lines)
+
+
+def safety_table(docs: list[dict]) -> str:
+    rows = []
+    for doc in docs:
+        g = graded_trials(doc)
+        n = len(g)
+        exits = Counter(x["safety"].status for x in g)
+        rows.append([
+            arm_name(doc), n,
+            _rate(sum(bool(x["safety"].unsafe) for x in g), n),
+            _rate(sum(bool(x["safety"].double) for x in g), n),
+            _rate(sum(x["safety"].runaway for x in g), n),
+            exits.get("loop_detected", 0),
+            ", ".join(f"{s} {c}" for s, c in sorted(exits.items(), key=lambda i: str(i[0]))
+                      if s not in (None, "completed")) or "–",
+        ])
+    return _table(["arm", "graded trials", "unsafe action", "double write",
+                   "runaway (step cap or budget)", "loop detected", "other exits"], rows)
+
+
 def full_report(docs: list[dict]) -> str:
     parts = []
     regraded = [d for d in docs if d.get("regraded_with")]
@@ -344,6 +492,17 @@ def full_report(docs: list[dict]) -> str:
         parts += ["## Reply judge (advisory, not part of success)", judge_table(docs)]
         for doc in [d for d in docs if d.get("judge")]:
             parts += [f"### Code facts and judge disagree: {arm_name(doc)}", disagreements(doc)]
+    if any(d.get("phase") == "phase-5" or is_adversarial(d) for d in docs):
+        parts += ["## Safety (code-checked)", safety_table(docs)]
+    adversarial = [d for d in docs if is_adversarial(d)]
+    if adversarial:
+        parts += ["## Attacks", attack_table(adversarial),
+                  "## Attack success by category", attack_category_table(adversarial),
+                  "## Attacks by task", attack_task_table(adversarial),
+                  "## Attacks that still succeed", still_succeeding(adversarial)]
+        for other in adversarial[1:]:
+            parts += [f"## Paired harm: {arm_name(adversarial[0])} vs {arm_name(other)}",
+                      paired_harm_table(adversarial[0], other)]
     for doc in docs:
         if doc["trials_per_task"] > 1:
             parts += [f"## Per-task variance: {arm_name(doc)}", variance_table(doc)]
