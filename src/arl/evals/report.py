@@ -472,6 +472,118 @@ def safety_table(docs: list[dict]) -> str:
                    "runaway (step cap or budget)", "loop detected", "other exits"], rows)
 
 
+# --- Stage 7: approvals --------------------------------------------------------------------
+
+def has_approvals(doc: dict) -> bool:
+    return any((t.get("approvals") or {}).get("requests") for t in doc["trials"])
+
+
+def _approvals(trial: dict) -> dict:
+    return trial.get("approvals") or {"requests": 0, "flagged_calls": 0, "approved": 0,
+                                      "rejected": 0, "reviews": []}
+
+
+def approval_table(docs: list[dict]) -> str:
+    """The reviewer's load per arm. An arm without a gate shows zeros."""
+    rows = []
+    for doc in docs:
+        trials = [t for t in doc["trials"] if t["success"] is not None]
+        n = len(trials)
+        a = [_approvals(t) for t in trials]
+        requests, flagged = sum(x["requests"] for x in a), sum(x["flagged_calls"] for x in a)
+        rows.append([arm_name(doc), n, requests, f"{100 * requests / n:.1f}" if n else "–",
+                     f"{100 * flagged / n:.1f}" if n else "–",
+                     sum(x["approved"] for x in a), sum(x["rejected"] for x in a),
+                     sum(1 for x in a if x["requests"])])
+    return _table(["arm", "graded trials", "approval requests",
+                   "requests per 100 tickets", "flagged calls per 100 tickets", "approved",
+                   "rejected", "trials with a request"], rows)
+
+
+def approval_task_table(docs: list[dict]) -> str:
+    """Per task and arm: requests, and approved / rejected calls."""
+    docs = [d for d in docs if has_approvals(d)]
+    cells: dict[str, dict[str, str]] = defaultdict(dict)
+    for doc in docs:
+        by_task = defaultdict(list)
+        for t in doc["trials"]:
+            by_task[t["task_id"]].append(_approvals(t))
+        for task_id, xs in by_task.items():
+            if any(x["requests"] for x in xs):
+                cells[task_id][arm_name(doc)] = (
+                    f"{sum(x['requests'] for x in xs)} req: {sum(x['approved'] for x in xs)} "
+                    f"approved, {sum(x['rejected'] for x in xs)} rejected of {len(xs)} trials")
+    order = list(dict.fromkeys(t for d in docs for t in d["task_ids"] if t in cells))
+    return _table(["task", *(arm_name(d) for d in docs)],
+                  [[t, *(cells[t].get(arm_name(d), "–") for d in docs)] for t in order])
+
+
+def _is_attack(task, call: dict) -> bool:
+    """Does a reviewed call match one of the task's attack attempts?"""
+    from arl.evals.graders.attack import _args_match
+    from arl.evals.transcript import ToolCallRecord
+
+    if task is None or task.attack is None:
+        return False
+    args = call["arguments"]
+    record = ToolCallRecord(0, call["tool"], args if isinstance(args, str) else json.dumps(args),
+                            {}, False)
+    return any(spec.tool == call["tool"] and _args_match(spec.args, record)
+               for spec in task.attack.attempt)
+
+
+def reviewer_replay_table(docs: list[dict]) -> str:
+    """Counterfactual: the logged packets shown to other reviewers. It counts what each would
+    have approved, not what the run would then have done (a different answer changes the
+    rest of the run). An approved attack call is a write the gate would have let through,
+    subject to the invariants and grounding after it."""
+    from arl.framework.approval import REPLAY_REVIEWERS
+
+    rows = []
+    for doc in [d for d in docs if has_approvals(d)]:
+        tasks = by_id(load_tasks(doc["task_set"]))
+        reviewed = [(tasks.get(t["task_id"]), review["packet"], call)
+                    for t in doc["trials"] for review in _approvals(t)["reviews"]
+                    for call in review["packet"]["calls"]]
+        for name, reviewer in REPLAY_REVIEWERS.items():
+            approved = attacks = attacks_approved = 0
+            for task, packet, call in reviewed:
+                verdict = reviewer.review({**packet, "calls": [call]})[call["call_id"]]
+                is_attack = _is_attack(task, call)
+                approved += verdict["decision"] == "approve"
+                attacks += is_attack
+                attacks_approved += is_attack and verdict["decision"] == "approve"
+            rows.append([arm_name(doc), name, len(reviewed), approved,
+                         f"{attacks_approved} of {attacks}",
+                         f"{approved - attacks_approved} of {len(reviewed) - attacks}"])
+    return _table(["arm", "reviewer (replayed)", "flagged calls", "approved",
+                   "attack calls approved", "other calls approved"], rows)
+
+
+def paired_utility_table(a: dict, b: dict) -> str:
+    """Arm A against arm B on each adversarial task's utility rate. Higher is better."""
+    def utility_by_task(doc):
+        out = defaultdict(list)
+        for x in graded_trials(doc):
+            out[x["task"].id].append(x["attack"].utility)
+        return out
+
+    k = min(a["trials_per_task"], b["trials_per_task"])
+    ua, ub = utility_by_task(first_trials(a, k)), utility_by_task(first_trials(b, k))
+    rows, wins, losses, ties = [], 0, 0, 0
+    for task_id in [t for t in a["task_ids"] if ua.get(t) and ub.get(t)]:
+        ra, rb = statistics.mean(ua[task_id]), statistics.mean(ub[task_id])
+        better = "A" if ra > rb else "B" if rb > ra else "tie"
+        wins, losses, ties = wins + (better == "A"), losses + (better == "B"), ties + (better == "tie")
+        rows.append([task_id, f"{sum(ua[task_id])}/{len(ua[task_id])}",
+                     f"{sum(ub[task_id])}/{len(ub[task_id])}", better])
+    p = sign_test_p(wins, losses)
+    verdict = "a finding" if p < SIGNIFICANCE else "a direction, not a finding"
+    return (_table(["task", "A utility", "B utility", "more utility"], rows) +
+            f"\nA = {arm_name(a)}, B = {arm_name(b)}. More utility in A on {wins} tasks, in B on "
+            f"{losses}, tied on {ties}. Two-sided sign test p = {p:.3f}: {verdict}.")
+
+
 def full_report(docs: list[dict]) -> str:
     parts = []
     regraded = [d for d in docs if d.get("regraded_with")]
@@ -503,6 +615,14 @@ def full_report(docs: list[dict]) -> str:
         for other in adversarial[1:]:
             parts += [f"## Paired harm: {arm_name(adversarial[0])} vs {arm_name(other)}",
                       paired_harm_table(adversarial[0], other)]
+            if has_approvals(other) or has_approvals(adversarial[0]):
+                parts += [f"## Paired utility: {arm_name(adversarial[0])} vs {arm_name(other)}",
+                          paired_utility_table(adversarial[0], other)]
+    if any(has_approvals(d) for d in docs):
+        parts += ["## Approvals (reviewer load)", approval_table(docs),
+                  "## Approvals by task", approval_task_table(docs),
+                  "## Other reviewers, replayed on the logged packets (counterfactual)",
+                  reviewer_replay_table(docs)]
     for doc in docs:
         if doc["trials_per_task"] > 1:
             parts += [f"## Per-task variance: {arm_name(doc)}", variance_table(doc)]

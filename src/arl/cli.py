@@ -46,7 +46,9 @@ def _echo(title: str, payload: object) -> None:
 STRATEGY_HELP = ("single_round (rung 1), hand_loop (rung 2), rung 2 with guardrails: "
                  "guarded_prompt (prompt-only defence) or guarded_all (every guardrail); "
                  "rung 3 on LangGraph: graph_off, graph_all, or workflow (needs the "
-                 "framework extra).")
+                 "framework extra); with an approval gate: graph_approve_all (every write) "
+                 "or graph_approve_risk (refunds of $50 or more, and writes after untrusted "
+                 "text).")
 
 
 def _strategy(name: str):
@@ -67,15 +69,99 @@ def _load_ticket(ticket: str) -> tuple[str, str]:
     return data["id"], data["text"].strip()
 
 
+def _load_task(task_id: str):
+    from arl.evals.tasks import by_id, load_tasks
+
+    tasks = by_id(load_tasks("capability")) | by_id(load_tasks("adversarial"))
+    match = [t for t in tasks.values() if t.id == task_id or t.id.startswith(task_id + "-")]
+    if len(match) != 1:
+        raise typer.BadParameter(f"No single task '{task_id}'.", param_hint="--task")
+    return match[0]
+
+
+def _chat(model: str):
+    """The LangChain chat model for a thread (a seam for tests)."""
+    from arl.framework.models import make_chat_model
+
+    return make_chat_model(model)
+
+
+def _threads_root() -> Path:
+    from arl.framework import threads
+
+    return threads.THREADS_DIR
+
+
+def _print_result(result) -> None:
+    typer.secho("\n===== REPLY =====", bold=True)
+    typer.echo(result.reply or "(no reply text)")
+
+
+def _after_thread(thread_id: str, result) -> None:
+    from arl.framework.approval import render_packet
+    from arl.framework.threads import pending_packet
+
+    if result.status == "paused":
+        typer.secho(f"\n===== WAITING FOR APPROVAL: thread {thread_id} =====", bold=True)
+        typer.echo(render_packet(pending_packet(thread_id, root=_threads_root())))
+        typer.echo(f"\nApprove:  arl approve {thread_id}\n"
+                   f"Reject:   arl reject {thread_id} --reason \"...\"\n"
+                   f"Cancel:   arl cancel {thread_id}")
+        return
+    if result.status == "cancelled":
+        typer.echo(f"\nThread {thread_id} was cancelled; its state is kept. "
+                   f"Continue it with: arl resume {thread_id}")
+        return
+    _print_result(result)
+    typer.echo(f"\nstatus: {result.status}   model calls: {result.model_calls}   "
+               f"tool calls: {result.tool_calls}   cost: ${result.cost_usd:.6f}\n"
+               f"audit: arl audit {thread_id}")
+
+
+def _run_thread(strategy: str, *, ticket: str | None, task_id: str | None, model: str,
+                thread: str | None, quiet: bool) -> None:
+    """A graph run as a thread: on files, so it can pause for a person, be cancelled, or be
+    resumed after a crash."""
+    from arl.env.seed import new_store
+    from arl.env.store import EnvConfig
+    from arl.evals.trial_env import trial_store
+    from arl.framework.threads import THREAD_STRATEGIES, start_thread
+    from arl.tracing.tracer import langfuse_client, new_run_id
+
+    guards, _ = THREAD_STRATEGIES[strategy]
+    if task_id:
+        task = _load_task(task_id)
+        ticket_id, text = task.id, task.ticket.strip()
+        source = trial_store(task, invariants=guards.invariants)
+    else:
+        ticket_id, text = _load_ticket(ticket)
+        source = new_store()
+        source.env = EnvConfig(invariants=guards.invariants)
+    thread_id = thread or new_run_id(ticket_id.split("-")[0])
+    typer.echo(f"thread: {thread_id}")
+    result = start_thread(text, ticket_id=ticket_id, source_store=source, chat=_chat(model),
+                          strategy=strategy, thread_id=thread_id, task_id=task_id,
+                          root=_threads_root(), langfuse=langfuse_client(),
+                          echo=(lambda title, payload: None) if quiet else _echo)
+    _after_thread(thread_id, result)
+
+
 @app.command()
 def run(
-    ticket: str = typer.Option(..., "--ticket", "-t", help="Ticket id (e.g. t1) or a YAML path."),
+    ticket: str = typer.Option(None, "--ticket", "-t", help="Ticket id (e.g. t1) or a YAML path."),
+    task: str = typer.Option(None, "--task",
+                             help="Run an eval task's ticket, with its setup and sender (e.g. a07). "
+                                  "Graph strategies only."),
     model: str = typer.Option(
         None, "--model", "-m",
         help="Model id; its provider comes from config/models.yaml. Default: `default` there.",
     ),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Do not print raw requests/responses."),
     strategy: str = typer.Option("single_round", "--strategy", "-s", help=STRATEGY_HELP),
+    thread: str = typer.Option(None, "--thread",
+                               help="Run as a named thread (saved to files; can pause, be "
+                                    "cancelled, and be resumed). Approval strategies always "
+                                    "run as threads."),
 ) -> None:
     """Run one ticket through a strategy and print what went over the wire."""
     from arl.env.seed import new_store
@@ -85,6 +171,17 @@ def run(
     from arl.tracing.tracer import Tracer, langfuse_client, new_run_id
 
     plan = _strategy(strategy)
+    if bool(ticket) == bool(task):
+        raise typer.BadParameter("Give --ticket or --task.")
+    if task or thread or strategy.startswith("graph_approve"):
+        from arl.framework.threads import THREAD_STRATEGIES
+
+        if strategy not in THREAD_STRATEGIES:
+            raise typer.BadParameter(f"Threads run {', '.join(THREAD_STRATEGIES)}.",
+                                     param_hint="--strategy")
+        _run_thread(strategy, ticket=ticket, task_id=task, thread=thread, quiet=quiet,
+                    model=model or load_models()["default"])
+        return
     conn = new_store()
     conn.env = EnvConfig(invariants=plan.invariants)
     ticket_id, text = _load_ticket(ticket)
@@ -426,3 +523,132 @@ def report_(
     typer.echo(text)
     if out:
         out.write_text(text)
+
+
+# --- Stage 7: threads, approval, cancel, resume, audit ------------------------------------------
+
+def _reviewer_name(reviewer: str | None) -> str:
+    import getpass
+
+    return reviewer or getpass.getuser()
+
+
+@app.command("threads")
+def threads_(
+    pending: bool = typer.Option(False, "--pending", help="Only threads waiting for approval."),
+) -> None:
+    """List threads: id, ticket, strategy, status (running, paused, done, cancelled, crashed)."""
+    from arl.framework.threads import Registry
+
+    rows = [r for r in Registry(_threads_root()).all() if not pending or r["status"] == "paused"]
+    if not rows:
+        typer.echo("No threads." if not pending else "Nothing is waiting for approval.")
+    for r in rows:
+        typer.echo(f"{r['thread_id']}  {r['ticket_id']}  {r['strategy']}  {r['status']}  "
+                   f"updated {r['updated_at']}")
+
+
+def _decide(thread_id: str, verdict: str, *, calls: list[str] | None, reason: str | None,
+            reviewer: str | None, yes: bool) -> None:
+    from arl.framework.approval import APPROVE, REJECT, decision, render_packet
+    from arl.framework.threads import Registry, continue_thread, pending_packet
+    from arl.tracing.tracer import langfuse_client
+
+    root = _threads_root()
+    record = Registry(root).get(thread_id)
+    packet = pending_packet(thread_id, root=root) if record["status"] == "paused" else None
+    if packet is None:
+        raise typer.BadParameter(f"Thread {thread_id} is {record['status']}, not waiting for "
+                                 "approval.")
+    typer.echo(render_packet(packet))
+    ids = [c["call_id"] for c in packet["calls"]]
+    unknown = set(calls or []) - set(ids)
+    if unknown:
+        raise typer.BadParameter(f"No pending call {', '.join(sorted(unknown))}.")
+    chosen = set(calls or ids)
+    name = _reviewer_name(reviewer)
+    other = REJECT if verdict == APPROVE else APPROVE
+    decisions = {i: decision(verdict if i in chosen else other, name,
+                             reason or ("approved" if verdict == APPROVE else "rejected"))
+                 for i in ids}
+    summary = ", ".join(f"{d['decision']} {i}" for i, d in decisions.items())
+    if not yes and not typer.confirm(f"\n{name}: {summary}. Record and continue the run?"):
+        raise typer.Abort()
+    result = continue_thread(thread_id, chat=_chat(record["model"]), decisions=decisions,
+                             root=root, how=verdict, langfuse=langfuse_client())
+    _after_thread(thread_id, result)
+
+
+@app.command()
+def approve(
+    thread_id: str = typer.Argument(..., help="The thread waiting for approval."),
+    call: list[str] = typer.Option(None, "--call",  # noqa: B008
+                                   help="Approve only this call id (repeatable); the other "
+                                        "pending calls are rejected."),
+    reason: str = typer.Option(None, "--reason", help="Why, for the audit log."),
+    reviewer: str = typer.Option(None, "--reviewer", help="Who approves. Default: your user name."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask to confirm."),
+) -> None:
+    """Show what a paused thread wants to do, approve it, and continue the run here."""
+    _decide(thread_id, "approve", calls=call, reason=reason, reviewer=reviewer, yes=yes)
+
+
+@app.command()
+def reject(
+    thread_id: str = typer.Argument(..., help="The thread waiting for approval."),
+    reason: str = typer.Option(..., "--reason", help="Why: the model is told, and it is logged."),
+    call: list[str] = typer.Option(None, "--call",  # noqa: B008
+                                   help="Reject only this call id (repeatable); the other "
+                                        "pending calls are approved."),
+    reviewer: str = typer.Option(None, "--reviewer", help="Who rejects. Default: your user name."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask to confirm."),
+) -> None:
+    """Reject what a paused thread wants to do; the run continues and replies to the customer."""
+    _decide(thread_id, "reject", calls=call, reason=reason, reviewer=reviewer, yes=yes)
+
+
+@app.command()
+def cancel(
+    thread_id: str = typer.Argument(...),
+    reviewer: str = typer.Option(None, "--reviewer", help="Who cancels. Default: your user name."),
+) -> None:
+    """Cancel a thread. A running one stops at its next step; its state is kept either way."""
+    from arl.framework.threads import cancel_thread
+
+    outcome = cancel_thread(thread_id, who=_reviewer_name(reviewer), root=_threads_root())
+    typer.echo({"requested": f"Cancel requested; thread {thread_id} stops at its next step.",
+                "cancelled": f"Thread {thread_id} is cancelled. Its state is kept: "
+                             f"arl audit {thread_id} --state"}.get(
+        outcome, f"Thread {thread_id} is already {outcome}."))
+
+
+@app.command()
+def resume(thread_id: str = typer.Argument(...)) -> None:
+    """Continue a crashed or cancelled thread from its last checkpoint."""
+    from arl.framework.threads import Registry, continue_thread
+    from arl.tracing.tracer import langfuse_client
+
+    root = _threads_root()
+    record = Registry(root).get(thread_id)
+    if record["status"] in ("running", "done"):
+        raise typer.BadParameter(f"Thread {thread_id} is {record['status']}.")
+    result = continue_thread(thread_id, chat=_chat(record["model"]), root=root,
+                             how="resume", langfuse=langfuse_client())
+    _after_thread(thread_id, result)
+
+
+@app.command()
+def audit(
+    thread_id: str = typer.Argument(...),
+    state: bool = typer.Option(False, "--state", help="Also print the last checkpoint."),
+) -> None:
+    """Rebuild a thread from its trace: the ticket, every call, who approved what, the end."""
+    from arl.framework.threads import audit_thread, render_audit, thread_state
+
+    typer.echo(render_audit(audit_thread(thread_id, root=_threads_root())))
+    if state:
+        snap = thread_state(thread_id, root=_threads_root())
+        values = {k: v for k, v in snap["values"].items() if k != "messages"}
+        typer.echo(f"\nLast checkpoint: next {snap['next'] or '(end)'}, "
+                   f"{len(snap['history'])} checkpoints")
+        typer.echo(json.dumps(values, indent=1, default=str))

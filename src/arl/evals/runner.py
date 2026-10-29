@@ -8,7 +8,8 @@
 The agent under test is a strategy: rung 1 (`single_round`), rung 2 (`hand_loop`), each
 unchanged, rung 2 with guardrails (`guarded_prompt`, `guarded_all`, Stage 5), or the Stage 6
 framework strategies on LangGraph: the graph agent (`graph_off`, `graph_all`) and the
-workflow (`workflow`). The runner gives it a fresh store with the task's environment (its
+workflow (`workflow`), and the Stage 7 graph agent with an approval gate answered by the
+scripted reviewer (`graph_approve_all`, `graph_approve_risk`). The runner gives it a fresh store with the task's environment (its
 setup, faults and sender, and the arm's invariants) and a tracer, and afterwards records what
 the store looks like. Every strategy is graded from the same trace events.
 """
@@ -48,7 +49,7 @@ from arl.tracing.tracer import RUNS_DIR, Tracer, read_events
 RESULTS_DIR = ROOT / "results"
 LEDGER_NAME = "spend.csv"
 EVAL_RUNS_DIR = RUNS_DIR / "eval"
-PHASE = "phase-6"
+PHASE = "phase-7"
 PHASE_BUDGET_USD = 1.00
 
 
@@ -98,6 +99,26 @@ def _workflow() -> Strategy:
                     cost_basis="hand_loop", max_usd=guards.limits.max_usd)
 
 
+def _approval(name: str, policy: str) -> Strategy:
+    """Stage 7: the graph agent with every guardrail on and an approval gate. The scripted
+    reviewer answers each pause in the same process; the checkpoints of a sweep go to one
+    SQLite file beside its traces."""
+    guards = PROFILES["guarded_all"]
+
+    def run(ticket, **kwargs):
+        from arl.framework.approval import POLICIES, ScriptedReviewer
+        from arl.framework.graph_agent import run_graph_agent
+        from arl.framework.threads import checkpointer
+
+        saver = checkpointer(str(kwargs["tracer"].path.parent / "checkpoints.sqlite"))
+        return run_graph_agent(ticket, guards=guards, strategy=name, policy=POLICIES[policy],
+                               reviewer=ScriptedReviewer(), checkpointer=saver, **kwargs)
+
+    return Strategy(name, run, max_calls=MAX_STEPS + (1 if guards.truncation_retry else 0),
+                    prior_calls=4, invariants=guards.invariants, cost_basis="graph_all",
+                    max_usd=guards.limits.max_usd if guards.limits else None)
+
+
 STRATEGIES = {
     "single_round": Strategy("single_round", run_single_round, max_calls=2, prior_calls=2),
     "hand_loop": Strategy("hand_loop", run_hand_loop, max_calls=MAX_STEPS, prior_calls=4),
@@ -106,6 +127,8 @@ STRATEGIES = {
     "graph_off": _graph("guarded_off", "graph_off", cost_basis="hand_loop"),
     "graph_all": _graph("guarded_all", "graph_all", cost_basis="guarded_all"),
     "workflow": _workflow(),
+    "graph_approve_all": _approval("graph_approve_all", "all_writes"),
+    "graph_approve_risk": _approval("graph_approve_risk", "risk_tiered"),
 }
 DEFAULT_STRATEGY = "single_round"
 # Request characters per input token, measured from the recorded t1 bodies in
@@ -274,6 +297,21 @@ def _baseline(task: Task) -> dict:
     return _BASELINES[key]
 
 
+def approvals_of(events: list[dict]) -> dict:
+    """The approval pauses of a trial: counts, and each packet with its decisions, so the
+    report can replay the packets through other reviewers without re-running anything."""
+    reviews, decided = [], {e["call_id"]: e for e in events if e["type"] == "approval_decision"}
+    for request in (e for e in events if e["type"] == "approval_request"):
+        reviews.append({"packet": request["packet"],
+                        "decisions": {c["call_id"]: {k: decided.get(c["call_id"], {}).get(k)
+                                                     for k in ("decision", "reviewer", "reason")}
+                                      for c in request["calls"]}})
+    verdicts = [d["decision"] for r in reviews for d in r["decisions"].values()]
+    return {"requests": len(reviews), "flagged_calls": len(verdicts),
+            "approved": verdicts.count("approve"), "rejected": verdicts.count("reject"),
+            "reviews": reviews}
+
+
 def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
               langfuse=None, strategy: str = DEFAULT_STRATEGY) -> dict:
     """One attempt at one task. API failures become an error trial; Ctrl-C propagates."""
@@ -321,6 +359,7 @@ def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
         "verdict": verdict.to_dict(),
         "attack": attack.to_dict() if attack else None,
         "safety": safety(task, transcript).to_dict(),
+        "approvals": approvals_of(events),
         "transcript": transcript.to_dict(),
     }
 

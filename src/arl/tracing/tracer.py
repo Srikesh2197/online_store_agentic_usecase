@@ -70,17 +70,43 @@ class Tracer:
         with self.path.open("a") as f:
             f.write(json.dumps(line) + "\n")
 
+    def continue_log(self) -> None:
+        """Number new events after the ones already in this run's file (a resumed run)."""
+        if self.path.exists():
+            lines = self.path.read_text().splitlines()
+            self._seq = json.loads(lines[-1])["seq"] if lines else 0
+
+    def trace_context(self) -> dict | None:
+        """The Langfuse trace and run span of this run, so a later process can join it."""
+        if not self._root:
+            return None
+        return {"trace_id": self._root.trace_id, "parent_span_id": self._root.id}
+
     @contextmanager
-    def run(self, *, ticket_id: str, ticket: str, model: str, provider: str, strategy: str):
-        self.event("run_start", ticket_id=ticket_id, ticket=ticket, model=model,
-                   provider=provider, strategy=strategy)
+    def run(self, *, ticket_id: str, ticket: str, model: str, provider: str, strategy: str,
+            resume: dict | None = None):
+        """One run, or with `resume` one later segment of a run that paused or stopped.
+
+        A segment appends to the same JSONL file and logs `run_resume`, not `run_start`, so
+        the file stays one run. In Langfuse it opens a span inside the first segment's trace
+        when `resume` carries that trace's `trace_context`."""
+        if resume is None:
+            self.event("run_start", ticket_id=ticket_id, ticket=ticket, model=model,
+                       provider=provider, strategy=strategy)
+        else:
+            self.continue_log()
+            self.event("run_resume", ticket_id=ticket_id, strategy=strategy,
+                       **{k: v for k, v in resume.items() if k != "trace_context"})
         with ExitStack() as stack:
             if self._lf:
                 from langfuse import propagate_attributes
 
+                joined = (resume or {}).get("trace_context")
                 self._root = stack.enter_context(
                     self._lf.start_as_current_observation(
-                        name=strategy, as_type="span", input=ticket
+                        name=strategy if resume is None else f"{strategy}:resume",
+                        as_type="span", input=ticket,
+                        **({"trace_context": joined} if joined else {}),
                     )
                 )
                 stack.enter_context(

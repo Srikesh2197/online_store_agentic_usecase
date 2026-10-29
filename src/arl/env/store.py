@@ -101,6 +101,9 @@ class EnvConfig:
     invariants: bool = False                 # write tools enforce the policy invariants
     sender_customer_id: str | None = None    # the signed-in sender, if the ticket has one
     faults: object | None = None             # an env.faults.FaultInjector, or None
+    # Where the idempotency keys live: "temp" (gone with the connection, the default) or the
+    # name of an ATTACHed database file, so the keys survive a crash with the store (Stage 7).
+    key_schema: str = "temp"
 
 
 class Store(sqlite3.Connection):

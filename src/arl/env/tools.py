@@ -603,17 +603,21 @@ def _with_key(conn: sqlite3.Connection, tool: Tool, args: BaseModel, key: str) -
 
     The key row is inserted in the same transaction as the write, so the tool's own commit
     stores both or neither. A second call with the key returns the first result. The table
-    is TEMP: it is not in sqlite_master, so it is not part of the store's end state.
+    is TEMP by default: it is not in sqlite_master, so it is not part of the store's end
+    state. With `env.key_schema` naming an attached database file, the keys outlive the
+    process; a commit then covers both files at once (SQLite's multi-file commit, which is
+    atomic when the store is a file in rollback-journal mode).
     """
-    conn.execute(f"CREATE TEMP TABLE IF NOT EXISTS {IDEMPOTENCY_TABLE} "
+    table = f"{env_of(conn).key_schema}.{IDEMPOTENCY_TABLE}"
+    conn.execute(f"CREATE TABLE IF NOT EXISTS {table} "
                  "(id TEXT PRIMARY KEY, tool TEXT NOT NULL, result TEXT)")
-    row = conn.execute(f"SELECT tool, result FROM {IDEMPOTENCY_TABLE} WHERE id = ?",
+    row = conn.execute(f"SELECT tool, result FROM {table} WHERE id = ?",
                        (key,)).fetchone()
     if row is not None:
         first = json.loads(row["result"]) if row["result"] else {
             "note": "This call was already made; its result was not recorded."}
         return {**first, "replayed": True}
-    conn.execute(f"INSERT INTO {IDEMPOTENCY_TABLE} (id, tool, result) VALUES (?, ?, NULL)",
+    conn.execute(f"INSERT INTO {table} (id, tool, result) VALUES (?, ?, NULL)",
                  (key, tool.name))
     try:
         result = tool.fn(conn, args)
@@ -621,9 +625,9 @@ def _with_key(conn: sqlite3.Connection, tool: Tool, args: BaseModel, key: str) -
         conn.rollback()
         raise
     if "error" in result:   # nothing was written, so the key is released for a corrected call
-        conn.execute(f"DELETE FROM {IDEMPOTENCY_TABLE} WHERE id = ?", (key,))
+        conn.execute(f"DELETE FROM {table} WHERE id = ?", (key,))
     else:
-        conn.execute(f"UPDATE {IDEMPOTENCY_TABLE} SET result = ? WHERE id = ?",
+        conn.execute(f"UPDATE {table} SET result = ? WHERE id = ?",
                      (json.dumps(result), key))
     conn.commit()
     return result

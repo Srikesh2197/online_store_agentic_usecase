@@ -256,11 +256,43 @@ def test_sweep_runs_the_graph_agent(strategy, tmp_path, monkeypatch):
         calls(("get_order", {"order_id": "ORD-1003"})),
         calls(("cancel_order", {"order_id": "ORD-1003", "reason": "Wrong lamp"})),
         reply("Your order ORD-1003 is cancelled."))
-    assert doc["strategy"] == strategy and doc["phase"] == "phase-6"
+    assert doc["strategy"] == strategy and doc["phase"] == runner.PHASE
     assert all(t["success"] for t in doc["trials"]), [t["verdict"] for t in doc["trials"]]
     assert {(t["model_calls"], t["tool_calls"]) for t in doc["trials"]} == {(3, 2)}
     assert {t["transcript"]["strategy"] for t in doc["trials"]} == {strategy}
     assert doc["spent_usd"] == pytest.approx(2 * 3 * (1000 * 0.10 + 100 * 0.50) / 1e6)
+
+
+@pytest.mark.parametrize("strategy, asked", [("graph_approve_all", 1),
+                                             ("graph_approve_risk", 0)])
+def test_sweep_runs_the_approval_arms_with_the_scripted_reviewer(strategy, asked, tmp_path,
+                                                                 monkeypatch):
+    # c07 cancels ORD-1003. Every write asks under all_writes; a cancel on a clean run does
+    # not under risk_tiered. The scripted reviewer approves it (the ticket names the order).
+    from scripted import calls, reply
+
+    doc = _framework_sweep(
+        tmp_path, monkeypatch, strategy,
+        calls(("get_order", {"order_id": "ORD-1003"})),
+        calls(("cancel_order", {"order_id": "ORD-1003", "reason": "Wrong lamp"})),
+        reply("Your order ORD-1003 is cancelled."))
+    assert all(t["success"] for t in doc["trials"]), [t["verdict"] for t in doc["trials"]]
+    for trial in doc["trials"]:
+        approvals = trial["approvals"]
+        assert (approvals["requests"], approvals["flagged_calls"]) == (asked, asked)
+        assert approvals["approved"] == asked and approvals["rejected"] == 0
+        if asked:
+            [review] = approvals["reviews"]
+            assert review["packet"]["calls"][0]["tool"] == "cancel_order"
+            assert list(review["decisions"].values())[0]["reviewer"] == "scripted-v1"
+    assert (tmp_path / "runs" / f"{strategy}-sweep" / "checkpoints.sqlite").exists()
+    assert runner.STRATEGIES[strategy].cost_basis == "graph_all"
+    from arl.evals import report
+
+    text = report.full_report([doc])
+    assert ("## Approvals (reviewer load)" in text) is bool(asked)
+    if asked:
+        assert "| scripted-v1 | 2 | 2 | 0 of 0 | 2 of 2 |" in text   # replayed: approves both
 
 
 def test_sweep_runs_the_workflow(tmp_path, monkeypatch):
