@@ -32,6 +32,15 @@ FROZEN_V1_HASH = "76254c561b0d"
 ADVERSARIAL_SET = "adversarial"
 FROZEN_ADVERSARIAL_HASH: str | None = "44c9b476eaa8"
 
+# The parallel set (Stage 8), frozen 2026-10-29: 8 bulk audits, where one ticket names several
+# orders and each needs its own lookups and judgement, so the work can be split between agents.
+# Built on the unchanged seed. Calibrated for validity, not difficulty: graph_all 8 x 1 passed
+# 7 (p06 failed only on "$22" against the fact "22.00"); one rewrite round widened the money
+# facts of p03, p06 and p07 and made the p06 ticket unambiguous ("both notebook packs"); p06
+# then passed again.
+PARALLEL_SET = "parallel"
+FROZEN_PARALLEL_HASH: str | None = "2cc7a9b329ed"
+
 TOOL_NAMES = {tool.name for tool in TOOLS}
 KINDS = {tool.kind for tool in TOOLS}
 

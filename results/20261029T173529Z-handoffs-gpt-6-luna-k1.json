@@ -1,0 +1,892 @@
+{
+ "sweep_id": "20261029T173529Z-handoffs-gpt-6-luna-k1",
+ "phase": "phase-8",
+ "strategy": "handoffs",
+ "max_model_calls": 11,
+ "model": "gpt-6-luna",
+ "provider": "openai",
+ "task_set": "capability",
+ "task_set_hash": "76254c561b0d",
+ "task_ids": [
+  "c02-status-two-orders",
+  "c09-refund-damaged-blender",
+  "c12-cancel-by-email"
+ ],
+ "trials_per_task": 1,
+ "trials_planned": 3,
+ "trials_run": 3,
+ "max_output_tokens": 2000,
+ "prices": {
+  "input": 0.1,
+  "cached_input": 0.01,
+  "output": 0.5,
+  "cache_write": 0.125
+ },
+ "estimate": {
+  "model": "gpt-6-luna",
+  "trials": 3,
+  "input_tokens_per_call": 1853,
+  "per_trial_expected": 0.0004499416666666667,
+  "per_trial_worst": 0.023444978070175447,
+  "basis": "measured: mean of 3 earlier handoffs trials of gpt-6-luna",
+  "strategy": "handoffs",
+  "expected_usd": 0.001349825,
+  "worst_usd": 0.07033493421052633
+ },
+ "cap_usd": 0.1,
+ "spent_usd": 0.00143085,
+ "status": "completed",
+ "started_at": "2026-10-29T17:35:29+00:00",
+ "finished_at": "2026-10-29T17:35:54+00:00",
+ "git_commit": "9176bd8-dirty",
+ "trials": [
+  {
+   "task_id": "c02-status-two-orders",
+   "category": "read",
+   "trial": 1,
+   "run_id": "20261029T173529Z-handoffs-gpt-6-luna-k1-c02-status-two-orders-k1",
+   "log": "runs/eval/20261029T173529Z-handoffs-gpt-6-luna-k1/20261029T173529Z-handoffs-gpt-6-luna-k1-c02-status-two-orders-k1.jsonl",
+   "success": true,
+   "error": null,
+   "model_calls": 3,
+   "tool_calls": 3,
+   "usage": {
+    "input_tokens": 4674,
+    "cached_input_tokens": 1626,
+    "output_tokens": 157,
+    "reasoning_tokens": 33,
+    "cache_write_tokens": 3039
+   },
+   "cost_usd": 0.000475535,
+   "latency_ms": 5313,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": true,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": true,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "no change, as expected"
+     },
+     {
+      "group": "facts",
+      "name": "fact: shipped",
+      "passed": true,
+      "detail": "found 'shipped'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: delivered",
+      "passed": true,
+      "detail": "found 'delivered'"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_order(order_id=ORD-1001)",
+      "passed": true,
+      "detail": "called in turn 2"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_order(order_id=ORD-1002)",
+      "passed": true,
+      "detail": "called in turn 2"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of cancel_order, create_return, escalate_to_human, issue_refund, update_shipping_address"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "approvals": {
+    "requests": 0,
+    "flagged_calls": 0,
+    "approved": 0,
+    "rejected": 0,
+    "reviews": []
+   },
+   "agents": {
+    "agents": {
+     "triage": {
+      "model_calls": 1,
+      "input_tokens": 1090,
+      "cached_input_tokens": 0,
+      "output_tokens": 67,
+      "cost_usd": 0.00016967500000000002,
+      "latency_ms": 1918
+     },
+     "orders": {
+      "model_calls": 2,
+      "input_tokens": 3584,
+      "cached_input_tokens": 1626,
+      "output_tokens": 90,
+      "cost_usd": 0.00030586000000000003,
+      "latency_ms": 3378
+     }
+    },
+    "delegations": 0,
+    "handoffs": 1,
+    "duplicate_reads": 0,
+    "batches": []
+   },
+   "transcript": {
+    "task_id": "c02-status-two-orders",
+    "ticket": "I have two orders with you, ORD-1001 and ORD-1002. What is the status of each one?",
+    "model": "gpt-6-luna",
+    "strategy": "handoffs",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 1090,
+       "cached_input_tokens": 0,
+       "output_tokens": 67,
+       "reasoning_tokens": 19,
+       "cache_write_tokens": 1087
+      },
+      "cost_usd": 0.00016967500000000002,
+      "latency_ms": 1918
+     },
+     {
+      "index": 2,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 1629,
+       "cached_input_tokens": 0,
+       "output_tokens": 72,
+       "reasoning_tokens": 14,
+       "cache_write_tokens": 1626
+      },
+      "cost_usd": 0.00023955000000000002,
+      "latency_ms": 1911
+     },
+     {
+      "index": 3,
+      "stop": "end",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 1955,
+       "cached_input_tokens": 1626,
+       "output_tokens": 18,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 326
+      },
+      "cost_usd": 6.631000000000001e-05,
+      "latency_ms": 1467
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "transfer_to_orders",
+      "arguments": "{\"reason\":\"Customer asks for status of two identified orders, ORD-1001 and ORD-1002. Please look up both and report their statuses.\"}",
+      "result": {
+       "transferred_to": "orders",
+       "message": "You are now the orders agent, and this ticket is yours. The triage agent handed it to you because: Customer asks for status of two identified orders, ORD-1001 and ORD-1002. Please look up both and report their statuses. Do what the customer needs with your own tools, then reply to the customer yourself."
+      },
+      "is_error": false
+     },
+     {
+      "turn": 2,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-1001\"}",
+      "result": {
+       "order": {
+        "id": "ORD-1001",
+        "customer_id": "CUS-0001",
+        "status": "shipped",
+        "placed_at": "2026-09-28",
+        "total_usd": "114.00",
+        "items": [
+         {
+          "sku": "SHOE-TR-42",
+          "name": "Trail running shoes",
+          "quantity": 1,
+          "unit_price_usd": "89.00"
+         },
+         {
+          "sku": "SOCK-WL-3P",
+          "name": "Wool socks 3-pack",
+          "quantity": 2,
+          "unit_price_usd": "12.50"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 2,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-1002\"}",
+      "result": {
+       "order": {
+        "id": "ORD-1002",
+        "customer_id": "CUS-0001",
+        "status": "delivered",
+        "placed_at": "2026-09-10",
+        "total_usd": "79.99",
+        "items": [
+         {
+          "sku": "BLND-CT-01",
+          "name": "Countertop blender",
+          "quantity": 1,
+          "unit_price_usd": "79.99"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "ORD-1001 is shipped. ORD-1002 is delivered.",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 5313,
+    "db_diff": {},
+    "error": null
+   }
+  },
+  {
+   "task_id": "c09-refund-damaged-blender",
+   "category": "write",
+   "trial": 1,
+   "run_id": "20261029T173529Z-handoffs-gpt-6-luna-k1-c09-refund-damaged-blender-k1",
+   "log": "runs/eval/20261029T173529Z-handoffs-gpt-6-luna-k1/20261029T173529Z-handoffs-gpt-6-luna-k1-c09-refund-damaged-blender-k1.jsonl",
+   "success": true,
+   "error": null,
+   "model_calls": 4,
+   "tool_calls": 4,
+   "usage": {
+    "input_tokens": 9065,
+    "cached_input_tokens": 6106,
+    "output_tokens": 332,
+    "reasoning_tokens": 111,
+    "cache_write_tokens": 2947
+   },
+   "cost_usd": 0.000596635,
+   "latency_ms": 8347,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": true,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": true,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "the expected change"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 79.99",
+      "passed": true,
+      "detail": "found '79.99'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 5 to 7 business days",
+      "passed": true,
+      "detail": "found '5-7 business days'"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment",
+      "passed": true,
+      "detail": "called in turn 2"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call issue_refund",
+      "passed": true,
+      "detail": "called in turn 3"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of create_return, escalate_to_human"
+     },
+     {
+      "group": "trajectory",
+      "name": "order get_shipment before issue_refund",
+      "passed": true,
+      "detail": "get_shipment in turn 2, issue_refund in turn 3"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "approvals": {
+    "requests": 0,
+    "flagged_calls": 0,
+    "approved": 0,
+    "rejected": 0,
+    "reviews": []
+   },
+   "agents": {
+    "agents": {
+     "triage": {
+      "model_calls": 1,
+      "input_tokens": 1087,
+      "cached_input_tokens": 1058,
+      "output_tokens": 93,
+      "cost_usd": 6.063e-05,
+      "latency_ms": 2044
+     },
+     "actions": {
+      "model_calls": 3,
+      "input_tokens": 7978,
+      "cached_input_tokens": 5048,
+      "output_tokens": 239,
+      "cost_usd": 0.000536005,
+      "latency_ms": 6274
+     }
+    },
+    "delegations": 0,
+    "handoffs": 1,
+    "duplicate_reads": 0,
+    "batches": []
+   },
+   "transcript": {
+    "task_id": "c09-refund-damaged-blender",
+    "ticket": "The blender in order ORD-1002 arrived with a cracked jug. Please refund it to my card today.",
+    "model": "gpt-6-luna",
+    "strategy": "handoffs",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 1087,
+       "cached_input_tokens": 1058,
+       "output_tokens": 93,
+       "reasoning_tokens": 19,
+       "cache_write_tokens": 26
+      },
+      "cost_usd": 6.063e-05,
+      "latency_ms": 2044
+     },
+     {
+      "index": 2,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2382,
+       "cached_input_tokens": 0,
+       "output_tokens": 87,
+       "reasoning_tokens": 28,
+       "cache_write_tokens": 2379
+      },
+      "cost_usd": 0.000341175,
+      "latency_ms": 1917
+     },
+     {
+      "index": 3,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2672,
+       "cached_input_tokens": 2379,
+       "output_tokens": 119,
+       "reasoning_tokens": 64,
+       "cache_write_tokens": 290
+      },
+      "cost_usd": 0.00011984,
+      "latency_ms": 2831
+     },
+     {
+      "index": 4,
+      "stop": "end",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2924,
+       "cached_input_tokens": 2669,
+       "output_tokens": 33,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 252
+      },
+      "cost_usd": 7.499000000000001e-05,
+      "latency_ms": 1526
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "transfer_to_actions",
+      "arguments": "{\"reason\":\"Customer reports a cracked blender jug in order ORD-1002 and requests a refund to their card today. This may qualify as a damaged-item refund, but delivery date, item price, and order/account details need to be checked; transfer for lookup and action under policy.\"}",
+      "result": {
+       "transferred_to": "actions",
+       "message": "You are now the actions agent, and this ticket is yours. The triage agent handed it to you because: Customer reports a cracked blender jug in order ORD-1002 and requests a refund to their card today. This may qualify as a damaged-item refund, but delivery date, item price, and order/account details need to be checked; transfer for lookup and action under policy. Do what the customer needs with your own tools, then reply to the customer yourself."
+      },
+      "is_error": false
+     },
+     {
+      "turn": 2,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-1002\"}",
+      "result": {
+       "order": {
+        "id": "ORD-1002",
+        "customer_id": "CUS-0001",
+        "status": "delivered",
+        "placed_at": "2026-09-10",
+        "total_usd": "79.99",
+        "items": [
+         {
+          "sku": "BLND-CT-01",
+          "name": "Countertop blender",
+          "quantity": 1,
+          "unit_price_usd": "79.99"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 2,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-1002\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-5002",
+        "order_id": "ORD-1002",
+        "carrier": "FedEx",
+        "tracking_number": "784412309915",
+        "status": "delivered",
+        "shipped_at": "2026-09-11",
+        "estimated_delivery": "2026-09-15",
+        "delivered_at": "2026-09-14"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 3,
+      "name": "issue_refund",
+      "arguments": "{\"order_id\":\"ORD-1002\",\"amount_usd\":\"79.99\",\"reason\":\"Refund for the countertop blender reported as arriving with a cracked jug within 30 days of delivery.\"}",
+      "result": {
+       "refund": {
+        "id": "REF-9002",
+        "order_id": "ORD-1002",
+        "amount_usd": "79.99",
+        "reason": "Refund for the countertop blender reported as arriving with a cracked jug within 30 days of delivery.",
+        "status": "issued",
+        "created_at": "2026-10-05"
+       },
+       "order_total_usd": "79.99",
+       "refunded_to_date_usd": "79.99",
+       "note": "The refund goes to the original payment method and arrives in 5 to 7 business days."
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "I\u2019ve issued a $79.99 refund to the original payment method for the blender. It should arrive in 5\u20137 business days.",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 8347,
+    "db_diff": {
+     "refunds": {
+      "insert": [
+       {
+        "id": "REF-9002",
+        "order_id": "ORD-1002",
+        "amount_cents": 7999,
+        "reason": "Refund for the countertop blender reported as arriving with a cracked jug within 30 days of delivery.",
+        "status": "issued",
+        "created_at": "2026-10-05"
+       }
+      ],
+      "delete": [],
+      "update": {}
+     }
+    },
+    "error": null
+   }
+  },
+  {
+   "task_id": "c12-cancel-by-email",
+   "category": "write",
+   "trial": 1,
+   "run_id": "20261029T173529Z-handoffs-gpt-6-luna-k1-c12-cancel-by-email-k1",
+   "log": "runs/eval/20261029T173529Z-handoffs-gpt-6-luna-k1/20261029T173529Z-handoffs-gpt-6-luna-k1-c12-cancel-by-email-k1.jsonl",
+   "success": true,
+   "error": null,
+   "model_calls": 6,
+   "tool_calls": 5,
+   "usage": {
+    "input_tokens": 14191,
+    "cached_input_tokens": 13363,
+    "output_tokens": 244,
+    "reasoning_tokens": 66,
+    "cache_write_tokens": 810
+   },
+   "cost_usd": 0.00035868,
+   "latency_ms": 10127,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": true,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": true,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "the expected change"
+     },
+     {
+      "group": "facts",
+      "name": "fact: cancelled",
+      "passed": true,
+      "detail": "found 'cancelled'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2038",
+      "passed": true,
+      "detail": "found 'ORD-2038'"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call cancel_order(order_id=ORD-2038)",
+      "passed": true,
+      "detail": "called in turn 5"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of escalate_to_human"
+     },
+     {
+      "group": "trajectory",
+      "name": "order list_orders/get_order before cancel_order",
+      "passed": true,
+      "detail": "list_orders in turn 3, cancel_order in turn 5"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "approvals": {
+    "requests": 0,
+    "flagged_calls": 0,
+    "approved": 0,
+    "rejected": 0,
+    "reviews": []
+   },
+   "agents": {
+    "agents": {
+     "triage": {
+      "model_calls": 1,
+      "input_tokens": 1097,
+      "cached_input_tokens": 1058,
+      "output_tokens": 46,
+      "cost_usd": 3.838e-05,
+      "latency_ms": 1722
+     },
+     "actions": {
+      "model_calls": 5,
+      "input_tokens": 13094,
+      "cached_input_tokens": 12305,
+      "output_tokens": 198,
+      "cost_usd": 0.0003203,
+      "latency_ms": 8363
+     }
+    },
+    "delegations": 0,
+    "handoffs": 1,
+    "duplicate_reads": 0,
+    "batches": []
+   },
+   "transcript": {
+    "task_id": "c12-cancel-by-email",
+    "ticket": "Hi, this is Grace, my email is grace.horvat20@example.com. Please cancel the order I placed yesterday, I don't need it any more.",
+    "model": "gpt-6-luna",
+    "strategy": "handoffs",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 1097,
+       "cached_input_tokens": 1058,
+       "output_tokens": 46,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 36
+      },
+      "cost_usd": 3.838e-05,
+      "latency_ms": 1722
+     },
+     {
+      "index": 2,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2319,
+       "cached_input_tokens": 2141,
+       "output_tokens": 67,
+       "reasoning_tokens": 40,
+       "cache_write_tokens": 175
+      },
+      "cost_usd": 7.708500000000001e-05,
+      "latency_ms": 1823
+     },
+     {
+      "index": 3,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2430,
+       "cached_input_tokens": 2316,
+       "output_tokens": 26,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 111
+      },
+      "cost_usd": 5.0335e-05,
+      "latency_ms": 1473
+     },
+     {
+      "index": 4,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2601,
+       "cached_input_tokens": 2427,
+       "output_tokens": 42,
+       "reasoning_tokens": 18,
+       "cache_write_tokens": 171
+      },
+      "cost_usd": 6.694499999999999e-05,
+      "latency_ms": 1613
+     },
+     {
+      "index": 5,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2826,
+       "cached_input_tokens": 2598,
+       "output_tokens": 45,
+       "reasoning_tokens": 8,
+       "cache_write_tokens": 225
+      },
+      "cost_usd": 7.6905e-05,
+      "latency_ms": 1925
+     },
+     {
+      "index": 6,
+      "stop": "end",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2918,
+       "cached_input_tokens": 2823,
+       "output_tokens": 18,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 92
+      },
+      "cost_usd": 4.903e-05,
+      "latency_ms": 1529
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "transfer_to_actions",
+      "arguments": "{\"reason\":\"The customer requests cancellation of an order. Route to actions agent to identify the order using the supplied account email and determine whether cancellation is allowed.\"}",
+      "result": {
+       "transferred_to": "actions",
+       "message": "You are now the actions agent, and this ticket is yours. The triage agent handed it to you because: The customer requests cancellation of an order. Route to actions agent to identify the order using the supplied account email and determine whether cancellation is allowed. Do what the customer needs with your own tools, then reply to the customer yourself."
+      },
+      "is_error": false
+     },
+     {
+      "turn": 2,
+      "name": "find_customer",
+      "arguments": "{\"email\":\"grace.horvat20@example.com\"}",
+      "result": {
+       "customer": {
+        "id": "CUS-0120",
+        "name": "Grace Horvat",
+        "email": "grace.horvat20@example.com"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 3,
+      "name": "list_orders",
+      "arguments": "{\"customer_id\":\"CUS-0120\",\"limit\":20}",
+      "result": {
+       "customer_id": "CUS-0120",
+       "total_orders": 3,
+       "orders": [
+        {
+         "id": "ORD-2038",
+         "status": "processing",
+         "placed_at": "2026-10-04",
+         "total_usd": "328.00"
+        },
+        {
+         "id": "ORD-2037",
+         "status": "shipped",
+         "placed_at": "2026-09-21",
+         "total_usd": "69.00"
+        },
+        {
+         "id": "ORD-2039",
+         "status": "delivered",
+         "placed_at": "2026-09-02",
+         "total_usd": "216.00"
+        }
+       ]
+      },
+      "is_error": false
+     },
+     {
+      "turn": 4,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2038\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2038",
+        "customer_id": "CUS-0120",
+        "status": "processing",
+        "placed_at": "2026-10-04",
+        "total_usd": "328.00",
+        "items": [
+         {
+          "sku": "TENT-2P-01",
+          "name": "Two-person tent",
+          "quantity": 1,
+          "unit_price_usd": "189.00"
+         },
+         {
+          "sku": "NOTE-A5-02",
+          "name": "A5 notebook 2-pack",
+          "quantity": 1,
+          "unit_price_usd": "11.00"
+         },
+         {
+          "sku": "PACK-DY-20",
+          "name": "Daypack 20L",
+          "quantity": 2,
+          "unit_price_usd": "64.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 5,
+      "name": "cancel_order",
+      "arguments": "{\"order_id\":\"ORD-2038\",\"reason\":\"Customer no longer needs the order and requested cancellation.\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2038",
+        "status": "cancelled",
+        "previous_status": "processing"
+       },
+       "note": "The order is cancelled."
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "Your order ORD-2038, placed yesterday, has been cancelled.",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 10127,
+    "db_diff": {
+     "orders": {
+      "insert": [],
+      "delete": [],
+      "update": {
+       "ORD-2038": {
+        "status": [
+         "processing",
+         "cancelled"
+        ],
+        "cancel_reason": [
+         null,
+         "Customer no longer needs the order and requested cancellation."
+        ]
+       }
+      }
+     }
+    },
+    "error": null
+   }
+  }
+ ]
+}

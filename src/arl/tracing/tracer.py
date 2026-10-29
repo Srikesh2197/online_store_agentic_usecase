@@ -57,18 +57,44 @@ class Tracer:
         self._seq = 0
         # False when a LangChain callback records the model calls in Langfuse instead.
         self.mirror_model_calls = True
+        # Stage 8: the agent whose events these are, in a multi-agent run. None in every
+        # single-agent run, so their logs are unchanged.
+        self.agent: str | None = None
 
     def event(self, type: str, **fields) -> None:
+        line = {"ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
+                "run_id": self.run_id, "type": type}
+        if self.agent is not None:
+            line["agent"] = self.agent
+        self._emit(line | fields)
+
+    def _emit(self, line: dict) -> None:
         self._seq += 1
-        line = {
-            "seq": self._seq,
-            "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
-            "run_id": self.run_id,
-            "type": type,
-            **fields,
-        }
         with self.path.open("a") as f:
-            f.write(json.dumps(line) + "\n")
+            f.write(json.dumps({"seq": self._seq, **line}) + "\n")
+
+    @contextmanager
+    def as_agent(self, agent: str | None):
+        """Tag the events logged inside this block with `agent`."""
+        previous, self.agent = self.agent, agent
+        try:
+            yield self
+        finally:
+            self.agent = previous
+
+    def child(self, agent: str) -> "BufferedTracer":
+        """A tracer for a subagent running in another thread: same run, events kept in
+        memory until `merge` writes them into this run's file."""
+        return BufferedTracer(self, agent)
+
+    def merge(self, child: "BufferedTracer", call_offset: int) -> None:
+        """Append a child's events in the order it logged them. Its model calls were
+        numbered from 1; they are renumbered after the run's `call_offset` calls so far, so
+        call numbers are continuous across agents whatever order the threads ran in."""
+        for line in child.lines:
+            if "call_index" in line:
+                line = {**line, "call_index": line["call_index"] + call_offset}
+            self._emit(line)
 
     def continue_log(self) -> None:
         """Number new events after the ones already in this run's file (a resumed run)."""
@@ -225,6 +251,27 @@ class Tracer:
             )
             if observation:
                 observation.update(output=result, level="WARNING" if is_error else "DEFAULT")
+
+
+class BufferedTracer(Tracer):
+    """A subagent's tracer (Stage 8). Same interface; `event` keeps lines in memory, so
+    threads never write to the run's file. Langfuse observations go to the parent's client
+    (the thread's copied context keeps them nested)."""
+
+    def __init__(self, parent: Tracer, agent: str):
+        self.run_id = parent.run_id
+        self.phase = parent.phase
+        self.path = parent.path
+        self.trace_url = parent.trace_url
+        self._lf = parent._lf
+        self._root = None
+        self._seq = 0
+        self.mirror_model_calls = parent.mirror_model_calls
+        self.agent = agent
+        self.lines: list[dict] = []
+
+    def _emit(self, line: dict) -> None:
+        self.lines.append(line)
 
 
 def read_events(path: Path) -> list[dict]:

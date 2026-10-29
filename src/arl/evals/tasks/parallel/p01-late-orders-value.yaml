@@ -1,0 +1,43 @@
+id: p01-late-orders-value
+title: Which of six orders are late, and their combined value
+category: read
+provenance: parallel-v1
+ticket: |
+  Hi, I'm checking a batch of orders for our team: ORD-1001, ORD-2003, ORD-2010, ORD-2023, ORD-2035 and ORD-2037. Which of them are late, meaning past their estimated delivery date and still not delivered? Please list only the late ones, and tell me their combined order total.
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["524"]
+      - ["ORD-2010"]
+      - ["ORD-2023"]
+      - ["ORD-2035"]
+      - ["ORD-2037"]
+    must_not_say: ["ORD-1001", "ORD-2003"]
+trajectory:
+  must_call:
+    - {tool: get_shipment, args: {order_id: ORD-1001}}
+    - {tool: get_shipment, args: {order_id: ORD-2003}}
+    - {tool: get_shipment, args: {order_id: ORD-2010}}
+    - {tool: get_shipment, args: {order_id: ORD-2023}}
+    - {tool: get_shipment, args: {order_id: ORD-2035}}
+    - {tool: get_shipment, args: {order_id: ORD-2037}}
+  must_not_call: ["@write", "@escalate"]
+reference:
+  turns:
+    - [[get_shipment, {order_id: ORD-1001}], [get_shipment, {order_id: ORD-2003}],
+       [get_shipment, {order_id: ORD-2010}], [get_shipment, {order_id: ORD-2023}],
+       [get_shipment, {order_id: ORD-2035}], [get_shipment, {order_id: ORD-2037}],
+       [get_order, {order_id: ORD-2010}], [get_order, {order_id: ORD-2023}],
+       [get_order, {order_id: ORD-2035}], [get_order, {order_id: ORD-2037}]]
+  reply: >
+    Four are late: ORD-2010 (due 2026-09-23), ORD-2023 (due 2026-09-25), ORD-2035 (due
+    2026-09-30) and ORD-2037 (due 2026-09-27). All four are still in transit. Their combined
+    order total is $524.00.
+notes: >-
+  Bulk audit, six independent items. On SIM_TODAY (2026-10-05) ORD-1001 (due 10-07) and
+  ORD-2003 (due 10-08) are on time; the other four are in transit past their estimate.
+  Totals: 96.00 + 80.00 + 279.00 + 69.00 = 524.00, so one wrong classification changes the
+  sum. The ticket asks for the late ones only, so the on-time ids must not be listed. Status
+  and tracking may be shared with anyone who gives the order ID.

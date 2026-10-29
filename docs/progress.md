@@ -476,3 +476,74 @@ Spend: **$0.068** (smoke $0.0013; four sweeps $0.066; live checks about $0.0006 
 - Should taint stay the default with approval only as an override (safer against rubber-stamping), rather than approval replacing the block?
 - The workflow's gate (before `act`) and its `wf_N` ids: needed only if the workflow is deployed.
 - Nothing resumes a crashed thread automatically; Stage 10 needs a sweeper or a durable-execution runner.
+
+## Stage 8: Multi-agent (rung 4) — built 2026-10-29
+
+Branch `feature_0928_04`. Not committed. Write-up: [stages/08-multi-agent.md](stages/08-multi-agent.md).
+
+### What was built
+
+| Path | Contents |
+|---|---|
+| `src/arl/framework/graph_agent.py` | Opt-in `AgentContext` fields (`agent`, `tools`, `system`, `delegates`, `run_delegates`) and `Delegated`; in `tools`: the `toolset` guard (`tool_not_available`), `act_after_reports` (no write in a turn that asks a specialist), a pre-pass that gates and runs delegated calls and merges them in call order; `run_graph_agent(agent_fields=...)`. With the defaults it is Stage 7's graph exactly |
+| `src/arl/framework/multi/specialists.py` | Specialists orders (5 reads), refunds (get_order, get_shipment; an assessor), policy (no tools); the supervisor's role; every prompt = policy + defence + `## Your role: <name>` section; `MULTI_GUARDS` (graph_all's guards, 60,000-token pool) |
+| `src/arl/framework/multi/supervisor.py` | `run_supervisor`: the graph agent with the writes, escalation and `ask_orders` / `ask_refunds` / `ask_policy`, no reads. Specialists run concurrently (`ContextThreadPoolExecutor`), each on a backup copy of the store, logging into a buffered tracer merged in call order; the pool split between concurrent specialists; at most 8 specialist runs per ticket, 5 calls each |
+| `src/arl/framework/multi/handoffs.py` | `run_handoffs`: one graph, `HandoffState` (`active`, `handoffs`), peers triage → orders → actions (the single writer), graph_agent's nodes run as the active peer via `runtime.override`; transfer tools; at most 3 handoffs, one per turn |
+| `src/arl/framework/multi/__init__.py` | `SUB_MAX_STEPS`, `MAX_DELEGATIONS` (import-free, for the runner) |
+| `src/arl/tracing/tracer.py` | `agent` on every event when set (`as_agent`); `BufferedTracer`; `merge(child, call_offset)`. Single-agent logs unchanged |
+| `src/arl/evals/runner.py`, `report.py`, `cli.py` | Strategies `supervisor`, `handoffs`; `agents_of()` per trial (per-agent calls/tokens/cost, delegations, handoffs, repeated lookups, concurrent batches); `Strategy.worst_case`; report sections "Multi-agent cost against the first arm", "by agent", "Coordination"; `PHASE = "phase-8"` |
+| `src/arl/evals/tasks.py`, `tasks/parallel/p01…p08.yaml` | The parallel set, 8 bulk audits on the unchanged seed (5 read, 3 write), `FROZEN_PARALLEL_HASH = 2cc7a9b329ed` |
+| `tests/` | `multi_helpers.py` (`AgentRouter`: a script per agent, chosen by the role line); `scripted.py` gained an optional call-id `prefix`; `test_supervisor.py` 29, `test_handoffs.py` 13, `test_parallel_set.py` 37, runner 4. 698 pass and 2 are skipped, with no API calls |
+| `results/` | 11 sweep files (7 smoke/calibration/re-check, 4 main); `report-phase8-v1.md`, `report-phase8-parallel.md` |
+| `runs/phase8-logs/` | `smoke.sh`, `sweeps.sh` and their logs |
+
+Unchanged: `hand_loop.py`, `guarded_loop.py`, `single_round.py`, `guardrails/`, `env/`, `llm/`, `workflow.py`, `approval.py`, `threads.py`, the graders, `transcript.py`, the v1 and adversarial task files. No new packages.
+
+### Decisions made
+
+- **The supervisor is the graph agent whose tools include agents;** a specialist is the same compiled graph with its own context, invoked from the supervisor's `tools` node. The approval gate therefore works on the supervisor unchanged (one scripted test); the sweeps ran without it (reference `graph_all`).
+- **Single writer, enforced in code:** the supervisor (handoffs: `actions`); any other agent asking for a write gets `tool_not_available`.
+- **Real threads** for specialists asked in one turn (your choice), each on its own store copy; traces merged in call order, so the file does not depend on timing.
+- **One budget pool per run,** 60,000 tokens (3× the single agent), $0.01, 120 s (your choice); split equally between concurrent specialists.
+- **Specialists see the brief only** (your choice).
+- **Taint and grounding are run-level** and flow back from specialists; loop counts are per agent context.
+- **A specialist run is a fresh root graph** (its own thread id in `configurable`): no checkpoints into the parent, no inherited drain; callbacks still nest (Langfuse: `supervisor → tools → agent:orders`, checked live).
+- **The handoff result tells the new peer it owns the ticket** (fix for a smoke-run bug: the new peer read the transfer as its own turn and replied with nothing).
+- **Parallel set calibrated for validity:** one rewrite round (money facts accept "$22"; p06 says "both notebook packs"), then frozen.
+
+### Measured in stage 8
+
+Spend: **$0.155** (smoke and calibration $0.018, re-checks $0.003, sweeps $0.133).
+
+| v1 (30 × 3; single agent k5 paired on 3) | Success | $/run | Tokens × | Cost × | Calls × | p50 latency × |
+|---|---|---|---|---|---|---|
+| `graph_all` (single) | 98% | $0.000187 | 1.00 | 1.00 | 1.00 | 1.00 (4.6 s) |
+| `supervisor` | 88% | $0.000464 | 1.56 | 2.45 | 1.78 | 2.36 |
+| `handoffs` | 98% | $0.000282 | 1.15 | 1.49 | 1.26 | 1.42 |
+
+| Parallel set (8 × 5) | Success | $/run | Tokens × | Cost × | Calls × | p50 latency × |
+|---|---|---|---|---|---|---|
+| `graph_all` (single) | 92% | $0.000479 | 1.00 | 1.00 | 1.00 | 1.00 (6.9 s) |
+| `supervisor` | 85% | $0.001179 | 1.81 | 2.46 | 2.26 | 2.24 |
+
+- **Findings (precise):** multi-agent cost more in every unit on both sets; dollars grew faster than tokens (more cache misses: 91.6% vs 95.5% cached); slower even with real threads (more sequential steps); on the 6-item audits the supervisor sent one brief for all six orders in 19 of 20 runs, so its parallelism was the single agent's (parallel tool calls) plus a layer; where it split (p06–p08) it repeated 2–4 lookups per run. No unsafe action, double write, runaway or limit in any arm.
+- **Directions:** supervisor vs single on v1, 6 tasks worse, 1 better, p = 0.125; on the parallel set p = 1.0 (the stated hypothesis, a gain on p01–p04, is not supported). Handoffs tie the single agent on v1; both its c18 failures are a phrase-list false negative ("No return has been authorized yet").
+- **Supervisor failure patterns (every failed trial read):** a doubt the supervisor's brief raised ("was it opened?") coming back from the refunds specialist as a blocker (c09, c11, p06: 5 trials); refuse-then-escalate (c15, c16, c21: 5); the delivery date lost between the report and the reply (c23: 3/3, as in the Phase 6 workflow); a brief that dropped the customer's words (p08: 3).
+- **Did multi-agent earn its cost? No.** Every ticket fits one context, parallel tool calls already give one agent concurrency, and our failures are information lost between agents.
+
+### What stage 9 needs to know
+
+- **The variant to compare against is still `graph_all`** (v1 k5 `20261029T001125Z`, adversarial k5 `20261029T003444Z`, parallel k5 `20261029T180017Z`). Multi-agent is not the deploy candidate.
+- **The evaluator-optimizer can reuse the delegate hook.** A verifier is a delegate the writer must call before acting, or a node after `model`; `run_delegates` already merges a subagent's spend into the run's pool and logs it as its own agent. `act_after_reports` is the pattern for "check before act" across agents.
+- **The failure patterns are evaluator targets:** refuse-then-escalate (c15, c16, c21, c22 across arms) and facts dropped from the reply (c23) are what a separate checker of "action vs policy" and "reply states the facts it used" could catch.
+- **MCP:** a tool served over MCP is still a store tool to the graph; keep `execute_tool` behind it so taint, grounding, keys and the toolset guard apply unchanged. Specialists run in threads, so an MCP client used by them must be safe across threads (or one per specialist).
+- **Memory:** per-agent prompts already repeat the policy; anything long-term memory adds to a prompt multiplies across agents. Keep memory in the single agent.
+- **Langfuse:** the legacy trace-list API returns 410 for this organisation (removal 2026-11-16); read traces with `api.observations.get_many(from_start_time=..., trace_id=...)`. Sweeps only mirror to Langfuse with `--langfuse`.
+- **Keep the Mac awake for sweeps:** `caffeinate -i` does not stop lid-close sleep; a calibration run stalled for 1h45m.
+
+### Open questions carried forward
+
+- Would structured briefs and reports (the customer's words verbatim, facts as fields) remove the four supervisor failure patterns? That needs a held-out split; it was not tuned on v1.
+- Would a supervisor pay off with a stronger orchestrator and cheap specialists (two model tiers), or on tasks with large tool results? Neither was tested.
+- Should the phrase grader handle negation ("No return has been authorized yet")? A reviewed grader change, for Phase 4.
+- Handoffs on the parallel set and on the adversarial set were not run.

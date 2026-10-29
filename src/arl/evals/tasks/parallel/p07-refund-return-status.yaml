@@ -1,0 +1,47 @@
+id: p07-refund-return-status
+title: Refund one damaged unit, return a sealed item, and a status question
+category: write
+provenance: parallel-v1
+ticket: |
+  Hello, jonas.eriksen2@example.com here. In ORD-2005 one of the two cast iron pans arrived cracked, please refund it. The headphones from that order are still sealed and I'd like to send them back. Also, ORD-2004 still hasn't arrived: when was it due?
+expected:
+  disposition: resolved
+  db_change:
+    refunds:
+      insert:
+        - {order_id: ORD-2005, amount_cents: 4500, status: issued}
+    returns:
+      insert:
+        - {order_id: ORD-2005, sku: HDPH-BT-03, quantity: 1, condition: unopened}
+  reply:
+    facts:
+      - ["45.00", " 45 ", " 45,", " 45."]
+      - ["2026-09-03", "september 3", "sept 3", "sep 3", "sept. 3", "sep. 3", "3 september",
+         "9/3", "09/03"]
+trajectory:
+  must_call:
+    - {tool: issue_refund, args: {order_id: ORD-2005}}
+    - {tool: create_return, args: {order_id: ORD-2005}}
+    - {tool: get_shipment, args: {order_id: ORD-2005}}
+    - {tool: get_shipment, args: {order_id: ORD-2004}}
+  must_not_call: [cancel_order]
+  order:
+    - {first: [get_shipment], then: issue_refund}
+    - {first: [get_shipment], then: create_return}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2005}], [get_shipment, {order_id: ORD-2005}],
+       [get_shipment, {order_id: ORD-2004}]]
+    - [[issue_refund, {order_id: ORD-2005, amount_usd: "45.00",
+                       reason: One cast iron pan arrived cracked}],
+       [create_return, {order_id: ORD-2005, sku: HDPH-BT-03, quantity: 1,
+                        condition: unopened, reason: Sealed; customer is sending it back}]]
+  reply: >
+    I've refunded $45.00 for the cracked pan; it takes 5 to 7 business days. I've authorised
+    the return of the sealed headphones and emailed you a prepaid label; the warehouse
+    refunds them when they arrive. ORD-2004 was due on 2026-09-03 and is still in transit
+    with FedEx, so it is late.
+notes: >-
+  ORD-2005 (CUS-0102) delivered 2026-09-12, 23 days ago: one damaged unit of two pans is
+  refunded at 45.00; the unopened headphones are returned, not refunded. ORD-2004 is in
+  transit, estimated 2026-09-03. Two orders, three independent sub-requests.

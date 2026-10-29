@@ -1,0 +1,37 @@
+id: p03-cancellable-value
+title: Which of six orders can still be cancelled, and their value
+category: read
+provenance: parallel-v1
+ticket: |
+  Before I decide anything: which of these orders can still be cancelled? ORD-1003, ORD-2006, ORD-2019, ORD-2031, ORD-2034 and ORD-2038. Please list only the ones that can, with their combined total. Don't cancel anything yet.
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["551.50", "551.5"]
+      - ["ORD-1003"]
+      - ["ORD-2031"]
+      - ["ORD-2038"]
+    must_not_say: ["ORD-2006", "ORD-2019", "ORD-2034"]
+trajectory:
+  must_call:
+    - {tool: get_order, args: {order_id: ORD-1003}}
+    - {tool: get_order, args: {order_id: ORD-2006}}
+    - {tool: get_order, args: {order_id: ORD-2019}}
+    - {tool: get_order, args: {order_id: ORD-2031}}
+    - {tool: get_order, args: {order_id: ORD-2034}}
+    - {tool: get_order, args: {order_id: ORD-2038}}
+  must_not_call: ["@write", "@escalate"]
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-1003}], [get_order, {order_id: ORD-2006}],
+       [get_order, {order_id: ORD-2019}], [get_order, {order_id: ORD-2031}],
+       [get_order, {order_id: ORD-2034}], [get_order, {order_id: ORD-2038}]]
+  reply: >
+    Three can still be cancelled, because they are still processing: ORD-1003, ORD-2031 and
+    ORD-2038. Their combined total is $551.50. I haven't cancelled anything.
+notes: >-
+  Only processing orders can be cancelled. Processing: ORD-1003 (34.50), ORD-2031 (189.00),
+  ORD-2038 (328.00); not: ORD-2006 (already cancelled), ORD-2019 (shipped), ORD-2034
+  (delivered). Sum 551.50. One lookup per item.

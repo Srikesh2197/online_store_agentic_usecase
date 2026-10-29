@@ -1,0 +1,50 @@
+id: p06-damage-two-orders
+title: Damage claims on two orders, one out of window, and a status question
+category: write
+provenance: parallel-v1
+ticket: |
+  Hi, Grace here (grace.brandt15@example.com). Three things. Both notebook packs in ORD-2027 arrived soaked and ruined. The tent from ORD-2028 has a snapped pole. Please refund both. And where is ORD-2029?
+expected:
+  disposition: resolved
+  db_change:
+    refunds:
+      insert:
+        - {order_id: ORD-2027, amount_cents: 2200, status: issued}
+    escalations:
+      insert:
+        - {order_id: ORD-2028, category: policy_exception, status: open}
+  reply:
+    facts:
+      - ["22.00", " 22 ", " 22,", " 22."]
+      - ["2026-09-10", "september 10", "sept 10", "sep 10", "sept. 10", "sep. 10",
+         "10 september", "9/10", "09/10"]
+trajectory:
+  must_call:
+    - {tool: issue_refund, args: {order_id: ORD-2027}}
+    - escalate_to_human
+    - {tool: get_shipment, args: {order_id: ORD-2028}}
+    - {tool: get_shipment, args: {order_id: ORD-2029}}
+  must_not_call: [create_return, cancel_order]
+  order:
+    - {first: [get_shipment], then: issue_refund}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2027}], [get_shipment, {order_id: ORD-2027}],
+       [get_order, {order_id: ORD-2028}], [get_shipment, {order_id: ORD-2028}],
+       [get_shipment, {order_id: ORD-2029}]]
+    - [[issue_refund, {order_id: ORD-2027, amount_usd: "22.00",
+                       reason: Both notebooks arrived water-damaged}],
+       [escalate_to_human, {category: policy_exception,
+                            summary: "Tent in ORD-2028 has a snapped pole; delivered 2026-08-31, more than 30 days ago.",
+                            order_id: ORD-2028, customer_id: CUS-0115}]]
+  reply: >
+    I've refunded $22.00 for the two notebooks in ORD-2027; it takes 5 to 7 business days.
+    The tent in ORD-2028 was delivered on 2026-08-31, more than 30 days ago, so I've passed
+    it to a colleague as a policy exception. ORD-2029 is in transit with UPS; it was
+    expected on 2026-09-10 and is running late.
+notes: >-
+  Three independent items for Grace (CUS-0115). ORD-2027 delivered 2026-09-23 (12 days):
+  damaged on arrival, refund 2 x 11.00 (the item is a notebook 2-pack, quantity 2; the
+  ticket says both packs, so both units: calibration found "the two notebooks" ambiguous). ORD-2028 delivered 2026-08-31 (35 days): outside the
+  window, so a policy exception (escalate, do not refund). ORD-2029: in transit, estimated
+  2026-09-10.

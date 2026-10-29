@@ -43,7 +43,7 @@ import json
 import time
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from functools import lru_cache
 from operator import add, or_
 from typing import Annotated, Any, TypedDict
@@ -81,7 +81,7 @@ from arl.guardrails.permissions import Taint
 from arl.guardrails.prompt import DEFENCE
 from arl.guardrails.retry import gave_up, with_retries
 from arl.guardrails.validation import Grounding
-from arl.llm.types import ToolCall, ToolChoice, Usage
+from arl.llm.types import ToolCall, ToolChoice, ToolSpec, Usage
 from arl.tracing.tracer import Tracer
 
 # --- State ---------------------------------------------------------------------------------
@@ -125,6 +125,24 @@ def initial_state(ticket: str) -> AgentState:
 
 
 @dataclass(frozen=True)
+class Delegated:
+    """What a delegated call (a subagent, or a handoff) did, for the tools node to merge.
+
+    `result` is the tool result the model reads. The rest is what the call changed in the
+    run: taint and grounded ids found by a subagent's reads, its model calls and spend, and
+    any extra state keys (a handoff sets `active`)."""
+    result: dict
+    tainted: bool = False
+    taint_sources: tuple[str, ...] = ()
+    grounded: tuple[str, ...] = ()
+    model_calls: int = 0
+    tool_calls: int = 0
+    usage: dict[str, int] = field(default_factory=dict)
+    cost_usd: float = 0.0
+    update: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class AgentContext:
     """What the nodes use but a checkpoint must not hold: passed on every invoke and resume."""
     setup: ChatSetup
@@ -136,6 +154,13 @@ class AgentContext:
     clock: Callable[[], float]
     sleep: Callable[[float], None]
     started: float              # clock() at the start of the run's working time
+    # Stage 8 (multi-agent). The defaults are the single agent of Stages 6 and 7 exactly.
+    agent: str | None = None              # this agent's name in the trace
+    tools: tuple[str, ...] | None = None  # the store tools it is offered; None: all ten
+    system: str | None = None             # its system prompt; None: the policy (+ defence)
+    delegates: tuple[ToolSpec, ...] = ()  # tools that run code here: subagents, handoffs
+    # Runs one batch's delegated calls: (calls, state, ctx) -> {call id: Delegated}
+    run_delegates: Callable | None = None
 
 
 # --- The graph -----------------------------------------------------------------------------
@@ -144,14 +169,25 @@ def system_prompt(guards: Guards) -> str:
     return build_instructions() + (DEFENCE if guards.prompt else "")
 
 
+def offered_specs(ctx: AgentContext) -> list[ToolSpec]:
+    """The tools this agent's model is given: its store tools, then its delegated tools."""
+    store = tool_specs()
+    if ctx.tools is not None:
+        store = [spec for spec in store if spec.name in ctx.tools]
+    return store + list(ctx.delegates)
+
+
 def _call_model(ctx: AgentContext, messages: list[AnyMessage], tool_choice: ToolChoice,
                 max_tokens: int, index: int) -> tuple[AIMessage, Usage, float]:
     setup = ctx.setup
     chat = setup if max_tokens == MAX_OUTPUT_TOKENS else setup.with_max_tokens(max_tokens)
+    specs = offered_specs(ctx)
+    # An agent with no tools at all (the policy specialist) calls the model unbound.
+    runnable = bind(chat, specs, tool_choice) if specs else chat.chat
     _, response, usage, cost = traced_call(
-        bind(chat, tool_specs(), tool_choice), messages, setup=setup,
-        system=system_prompt(ctx.guards), tool_choice=tool_choice, max_tokens=max_tokens,
-        index=index, tracer=ctx.tracer, echo=ctx.echo)
+        runnable, messages, setup=setup,
+        system=ctx.system or system_prompt(ctx.guards), tool_choice=tool_choice,
+        max_tokens=max_tokens, index=index, tracer=ctx.tracer, echo=ctx.echo)
     return response, usage, cost
 
 
@@ -192,6 +228,19 @@ def rejected(decision: dict) -> dict:
                        "Do not try it again. Tell the customer what was done and what was not."}
 
 
+def not_available(name: str) -> dict:
+    return {"error": "tool_not_available",
+            "message": f"You do not have the tool '{name}'. Use only the tools you were "
+                       "given. Nothing was changed."}
+
+
+def act_after_reports(name: str) -> dict:
+    return {"error": "wait_for_reports",
+            "message": f"{name} was not run: it came in the same turn as a question to a "
+                       "specialist. Read the specialists' reports first, then act in a "
+                       "later turn if they support it. Nothing was changed."}
+
+
 def tools_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict:
     ctx = runtime.context
     guards, tracer = ctx.guards, ctx.tracer
@@ -214,8 +263,18 @@ def tools_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict:
                      action=result["error"])
         return result
 
+    calls = tool_calls_of(state["messages"][-1])
+    delegated_names = {spec.name for spec in ctx.delegates}
+    batch_delegates = any(call.name in delegated_names for call in calls)
+
     def gate(call: ToolCall) -> dict | None:
         decision = decisions.get(call.id)
+        if (ctx.tools is not None and call.name not in ctx.tools
+                and call.name not in delegated_names):
+            return guard("toolset", call, not_available(call.name))
+        tool = _BY_NAME.get(call.name)
+        if batch_delegates and tool is not None and tool.kind != "read":
+            return guard("delegation", call, act_after_reports(call.name))
         if loops and (blocked := loops.check(call.name, call.arguments)):
             return guard("loop_detect", call, blocked)
         if decision and decision["decision"] == REJECT:
@@ -246,13 +305,48 @@ def tools_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict:
         except ToolFault as exc:
             return gave_up(call.name, tool.kind if tool else "read", exc)
 
+    # Delegated calls (Stage 8) are gated first and then run together, before the loop
+    # below logs every call in order. Only agents with delegates take this path.
+    delegated: dict[str, Delegated] = {}
+    if batch_delegates:
+        pending = []
+        for call in calls:
+            if call.name in delegated_names:
+                if (blocked := gate(call)) is not None:
+                    delegated[call.id] = Delegated(blocked)
+                else:
+                    pending.append(call)
+        if pending:
+            delegated |= ctx.run_delegates(pending, state, ctx)
+    sub = {"model_calls": 0, "tool_calls": 0, "usage": {}, "cost_usd": 0.0}
+    extra_grounded: set[str] = set()
+    extra_update: dict = {}
+
+    def merge_delegated(call: ToolCall, outcome: Delegated) -> dict:
+        """Fold what a subagent or handoff did into this step, in call order."""
+        nonlocal extra_update
+        if taint and outcome.tainted:
+            if not taint.tainted:
+                tracer.event("guard", layer="taint", tool=call.name, call_id=call.id,
+                             action="tainted", sources=list(outcome.taint_sources))
+            taint.tainted = True
+            taint.sources += list(outcome.taint_sources)
+        if grounding:   # ids its reads returned ground writes from the next step on
+            extra_grounded.update(outcome.grounded)
+        sub["model_calls"] += outcome.model_calls
+        sub["tool_calls"] += outcome.tool_calls
+        sub["usage"] = add_counts(sub["usage"], outcome.usage)
+        sub["cost_usd"] += outcome.cost_usd
+        extra_update = extra_update | outcome.update
+        return outcome.result
+
     results = []
-    calls = tool_calls_of(state["messages"][-1])
     for call in calls:   # in order, one at a time: one SQLite connection, as in the loop
         with tracer.tool_call(call_id=call.id, name=call.name,
                               arguments=call.arguments) as record:
-            result = gate(call)
-            if result is None:
+            if call.id in delegated:
+                result = merge_delegated(call, delegated[call.id])
+            elif (result := gate(call)) is None:
                 try:
                     result = execute(call)
                 except Exception as exc:  # noqa: BLE001 -- as in hand_loop
@@ -282,7 +376,11 @@ def tools_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict:
                    "taint_sources": taint.sources[len(state["taint_sources"]):]}
     if grounding:
         grounding.end_turn()
-        update["grounded"] = sorted(grounding.seen)
+        update["grounded"] = sorted(grounding.seen | extra_grounded)
+    if delegated:   # what the subagents spent counts in this run's totals and budgets
+        update |= {"model_calls": sub["model_calls"], "usage": sub["usage"],
+                   "cost_usd": sub["cost_usd"],
+                   "tool_calls": update["tool_calls"] + sub["tool_calls"], **extra_update}
     return update
 
 
@@ -482,13 +580,17 @@ def run_graph_agent(
     reviewer=None,
     checkpointer=None,
     control=None,
+    agent_fields: dict | None = None,
 ) -> RunResult:
     """Run one ticket. `adapter` names the model (as for every strategy); the call itself goes
     through a LangChain chat model, `chat` if given (tests), else one built from config.
 
     With a `policy` the run has an approval gate and needs a checkpointer (an in-memory one
     if none is given). The thread id is the tracer's run id, so the idempotency keys
-    (`run id : call id`) are the same in every process that continues the run."""
+    (`run id : call id`) are the same in every process that continues the run.
+
+    `agent_fields` (Stage 8) sets the multi-agent fields of the context: the agent's name,
+    tools, prompt and delegates. The supervisor is this same run with them set."""
     if max_steps < 2:
         raise ValueError("max_steps must be at least 2: one call to act, one to reply.")
     setup = chat or make_chat_model(adapter.model)
@@ -498,10 +600,12 @@ def run_graph_agent(
         checkpointer = InMemorySaver()
     started = clock()
     ctx = AgentContext(setup=setup, conn=conn, tracer=tracer, guards=guards,
-                       max_steps=max_steps, echo=echo, clock=clock, sleep=sleep, started=started)
+                       max_steps=max_steps, echo=echo, clock=clock, sleep=sleep, started=started,
+                       **(agent_fields or {}))
     graph = compiled_graph(policy, checkpointer)
-    with tracer.run(ticket_id=ticket_id, ticket=ticket, model=setup.model,
-                    provider=setup.provider, strategy=strategy):
+    with tracer.as_agent(ctx.agent), tracer.run(
+            ticket_id=ticket_id, ticket=ticket, model=setup.model, provider=setup.provider,
+            strategy=strategy):
         config = run_config(tracer, max_steps, gated=policy is not None,
                             thread_id=tracer.run_id if checkpointer is not None else None)
         return drive(graph, initial_state(ticket), config, ctx, reviewer=reviewer,

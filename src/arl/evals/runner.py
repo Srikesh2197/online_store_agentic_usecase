@@ -8,8 +8,9 @@
 The agent under test is a strategy: rung 1 (`single_round`), rung 2 (`hand_loop`), each
 unchanged, rung 2 with guardrails (`guarded_prompt`, `guarded_all`, Stage 5), or the Stage 6
 framework strategies on LangGraph: the graph agent (`graph_off`, `graph_all`) and the
-workflow (`workflow`), and the Stage 7 graph agent with an approval gate answered by the
-scripted reviewer (`graph_approve_all`, `graph_approve_risk`). The runner gives it a fresh store with the task's environment (its
+workflow (`workflow`), the Stage 7 graph agent with an approval gate answered by the
+scripted reviewer (`graph_approve_all`, `graph_approve_risk`), and the Stage 8 multi-agent
+patterns (`supervisor`, `handoffs`). The runner gives it a fresh store with the task's environment (its
 setup, faults and sender, and the arm's invariants) and a tracer, and afterwards records what
 the store looks like. Every strategy is graded from the same trace events.
 """
@@ -49,7 +50,7 @@ from arl.tracing.tracer import RUNS_DIR, Tracer, read_events
 RESULTS_DIR = ROOT / "results"
 LEDGER_NAME = "spend.csv"
 EVAL_RUNS_DIR = RUNS_DIR / "eval"
-PHASE = "phase-7"
+PHASE = "phase-8"
 PHASE_BUDGET_USD = 1.00
 
 
@@ -63,6 +64,9 @@ class Strategy:
     cost_basis: str | None = None  # another strategy whose measured cost to borrow until
                                    # this one has its own
     max_usd: float | None = None   # a per-run dollar budget, which bounds the worst case
+    # (tokens, input price, output price) -> a trial's worst case, for strategies whose calls
+    # are not one growing conversation (Stage 8). None: the default below.
+    worst_case: Callable | None = None
 
 
 def _guarded(profile: str, **fields) -> Strategy:
@@ -119,6 +123,51 @@ def _approval(name: str, policy: str) -> Strategy:
                     max_usd=guards.limits.max_usd if guards.limits else None)
 
 
+def _supervisor_worst(tokens: float, input_price: float, output_price: float) -> float:
+    """The supervisor's worst trial. Without a budget: its own 11 calls in one growing
+    conversation, and every specialist's 6 in its own. With the pool: the pool, then what can
+    still run after it trips: in each of up to 8 specialists running together, the call
+    that crossed, the reply-only call and a truncation retry; then the supervisor's
+    reply-only call and its retry, at its largest history."""
+    from arl.framework.multi import MAX_DELEGATIONS, SUB_MAX_STEPS
+
+    sup_calls, sub_calls = MAX_STEPS + 1, SUB_MAX_STEPS + 1
+
+    def last(n: int) -> float:
+        return (worst_trial_cost(tokens, input_price, output_price, n)
+                - worst_trial_cost(tokens, input_price, output_price, n - 1))
+
+    unbounded = (worst_trial_cost(tokens, input_price, output_price, sup_calls)
+                 + MAX_DELEGATIONS * worst_trial_cost(tokens, input_price, output_price,
+                                                      sub_calls))
+    bounded = (PROFILES["guarded_all"].limits.max_usd
+               + MAX_DELEGATIONS * 3 * last(sub_calls) + 2 * last(sup_calls))
+    return min(unbounded, bounded)
+
+
+def _multi(name: str) -> Strategy:
+    """Stage 8: a multi-agent pattern with graph_all's guardrails and one run-level budget
+    pool for all its agents. Imported on first use."""
+    guards = PROFILES["guarded_all"]
+
+    def run(ticket, **kwargs):
+        if name == "supervisor":
+            from arl.framework.multi.supervisor import run_supervisor
+            return run_supervisor(ticket, **kwargs)
+        from arl.framework.multi.handoffs import run_handoffs
+        return run_handoffs(ticket, **kwargs)
+
+    if name == "supervisor":
+        from arl.framework.multi import MAX_DELEGATIONS, SUB_MAX_STEPS
+        max_calls = MAX_STEPS + 1 + MAX_DELEGATIONS * (SUB_MAX_STEPS + 1)
+        return Strategy(name, run, max_calls=max_calls, prior_calls=6,
+                        invariants=guards.invariants, cost_basis="graph_all",
+                        max_usd=guards.limits.max_usd, worst_case=_supervisor_worst)
+    return Strategy(name, run, max_calls=MAX_STEPS + 1, prior_calls=5,
+                    invariants=guards.invariants, cost_basis="graph_all",
+                    max_usd=guards.limits.max_usd)
+
+
 STRATEGIES = {
     "single_round": Strategy("single_round", run_single_round, max_calls=2, prior_calls=2),
     "hand_loop": Strategy("hand_loop", run_hand_loop, max_calls=MAX_STEPS, prior_calls=4),
@@ -129,6 +178,8 @@ STRATEGIES = {
     "workflow": _workflow(),
     "graph_approve_all": _approval("graph_approve_all", "all_writes"),
     "graph_approve_risk": _approval("graph_approve_risk", "risk_tiered"),
+    "supervisor": _multi("supervisor"),
+    "handoffs": _multi("handoffs"),
 }
 DEFAULT_STRATEGY = "single_round"
 # Request characters per input token, measured from the recorded t1 bodies in
@@ -218,7 +269,9 @@ def estimate(tasks: list[Task], model: str, trials_per_task: int,
                              for t in tasks)
     input_price = max(price.input, price.cache_write or 0.0)   # no cache discount assumed
     worst = worst_trial_cost(tokens, input_price, price.output, plan.max_calls)
-    if plan.max_usd is not None:
+    if plan.worst_case is not None:
+        worst = plan.worst_case(tokens, input_price, price.output)
+    elif plan.max_usd is not None:
         # The budget is checked before each call, so a run can pass it by one call, then
         # make the reply-only call and at most one truncation retry: three calls at the
         # largest history.
@@ -312,6 +365,50 @@ def approvals_of(events: list[dict]) -> dict:
             "reviews": reviews}
 
 
+def agents_of(events: list[dict]) -> dict | None:
+    """Who did what in a multi-agent trial (Stage 8), so the report can split tokens and
+    cost by agent without the raw logs: per agent, its model calls, tokens, cost and model
+    time; the delegations and handoffs; read calls repeated in the run (isolated agents
+    look the same order up again); and, per turn that asked specialists, how many ran
+    together, their wall time and the sum of their times. None for a single-agent trial."""
+    if not any("agent" in e for e in events):
+        return None
+    from arl.env.tools import _BY_NAME
+
+    per: dict[str, dict] = {}
+    for e in events:
+        if e["type"] != "model_response":
+            continue
+        a = per.setdefault(e.get("agent") or "main", {
+            "model_calls": 0, "input_tokens": 0, "cached_input_tokens": 0,
+            "output_tokens": 0, "cost_usd": 0.0, "latency_ms": 0})
+        a["model_calls"] += 1
+        for key in ("input_tokens", "cached_input_tokens", "output_tokens"):
+            a[key] += e["usage"].get(key, 0)
+        a["cost_usd"] += e["cost_usd"]
+        a["latency_ms"] += e["latency_ms"]
+    reads = [(e["name"], json.dumps(json.loads(e["arguments"]), sort_keys=True)
+              if e["arguments"].startswith("{") else e["arguments"])
+             for e in events if e["type"] == "tool_call" and not e["is_error"]
+             and getattr(_BY_NAME.get(e["name"]), "kind", None) == "read"]
+    ends = {e["call_id"]: e for e in events if e["type"] in ("agent_end", "agent_error")}
+    batches: dict[int, list] = {}
+    for start in (e for e in events if e["type"] == "agent_start"):
+        end = ends.get(start["call_id"]) or {}
+        t0 = datetime.fromisoformat(start["started"]).timestamp() * 1000
+        batches.setdefault(start["after_call_index"], []).append(
+            (t0, t0 + end.get("latency_ms", 0), end.get("latency_ms", 0)))
+    return {
+        "agents": per,
+        "delegations": sum(1 for e in events if e["type"] == "agent_start"),
+        "handoffs": sum(1 for e in events if e["type"] == "handoff"),
+        "duplicate_reads": len(reads) - len(set(reads)),
+        "batches": [{"specialists": len(b), "wall_ms": round(max(x[1] for x in b)
+                                                             - min(x[0] for x in b)),
+                     "sum_ms": sum(x[2] for x in b)} for b in batches.values()],
+    }
+
+
 def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
               langfuse=None, strategy: str = DEFAULT_STRATEGY) -> dict:
     """One attempt at one task. API failures become an error trial; Ctrl-C propagates."""
@@ -360,6 +457,7 @@ def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
         "attack": attack.to_dict() if attack else None,
         "safety": safety(task, transcript).to_dict(),
         "approvals": approvals_of(events),
+        "agents": agents_of(events),
         "transcript": transcript.to_dict(),
     }
 

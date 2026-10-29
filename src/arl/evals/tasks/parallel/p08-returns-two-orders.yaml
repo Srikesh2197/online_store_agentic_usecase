@@ -1,0 +1,40 @@
+id: p08-returns-two-orders
+title: Returns from two orders, one not yet delivered
+category: write
+provenance: parallel-v1
+ticket: |
+  Hi, Jonas (jonas.abara11@example.com). I'd like to send back two things that are still sealed: the daypack from ORD-2020 and the headphones from ORD-2021.
+expected:
+  disposition: resolved
+  db_change:
+    returns:
+      insert:
+        - {order_id: ORD-2020, sku: PACK-DY-20, quantity: 1, condition: unopened}
+  reply:
+    facts:
+      - ["in transit", "on its way", "on the way", "not been delivered", "hasn't been delivered",
+         "not yet delivered", "hasn't arrived", "has not arrived", "not arrived", "once it arrives",
+         "once it's delivered", "after it arrives", "after delivery", "once delivered",
+         "when it arrives"]
+trajectory:
+  must_call:
+    - {tool: create_return, args: {order_id: ORD-2020}}
+    - {tool: get_shipment, args: {order_id: ORD-2020}}
+    - {tool: get_shipment, args: {order_id: ORD-2021}}
+  must_not_call: [issue_refund, cancel_order]
+  order:
+    - {first: [get_shipment], then: create_return}
+reference:
+  turns:
+    - [[get_order, {order_id: ORD-2020}], [get_shipment, {order_id: ORD-2020}],
+       [get_order, {order_id: ORD-2021}], [get_shipment, {order_id: ORD-2021}]]
+    - [[create_return, {order_id: ORD-2020, sku: PACK-DY-20, quantity: 1, condition: unopened,
+                        reason: Sealed; customer is sending it back}]]
+  reply: >
+    I've authorised the return of the sealed daypack from ORD-2020 and emailed you a prepaid
+    label. ORD-2021 is still in transit, so it can't be returned yet; once it arrives you can
+    send the headphones back within 30 days.
+notes: >-
+  Jonas (CUS-0111). ORD-2020 delivered 2026-10-04: an unopened item inside 30 days is a
+  return. ORD-2021 is shipped, in transit (estimated 2026-10-04), not delivered: it can be
+  neither cancelled nor returned yet; the policy offers a return after delivery.

@@ -329,3 +329,88 @@ def test_the_cli_knows_the_framework_strategies(monkeypatch):
                                               "--strategy", strategy])
         assert result.exit_code == 0, result.output
         assert strategy in result.output
+
+
+# --- Stage 8: the multi-agent strategies through the same harness --------------------------
+
+def test_sweep_runs_the_supervisor_and_records_who_did_what(tmp_path, monkeypatch):
+    from multi_helpers import AgentRouter
+    from scripted import calls, reply
+    from wire import wire_setup
+
+    look = ("get_order", {"order_id": "ORD-1003"})
+
+    def router():
+        return AgentRouter(
+            "openai",
+            supervisor=[calls(("ask_orders", {"brief": "Look up ORD-1003."}),
+                              ("ask_policy", {"question": "Can a processing order be cancelled?"})),
+                        calls(("cancel_order", {"order_id": "ORD-1003", "reason": "Wrong lamp"})),
+                        reply("Your order ORD-1003 is cancelled.")],
+            orders=[calls(look), calls(look), reply("ORD-1003 is processing.")],
+            policy=[reply("Yes, while it is processing.")])
+
+    monkeypatch.setattr("arl.framework.graph_agent.make_chat_model",
+                        lambda model: wire_setup(router(), "openai"))
+    doc = run_sweep(select(load_tasks(), "c07"), adapter=OpenAIAdapter("gpt-6-luna", send=None),
+                    trials_per_task=2, cap_usd=1.0, est=_estimate(0.05, 2),
+                    results_dir=tmp_path / "results", runs_dir=tmp_path / "runs",
+                    sweep_id="sup-sweep", strategy="supervisor")
+    assert all(t["success"] for t in doc["trials"]), [t["verdict"] for t in doc["trials"]]
+    trial = doc["trials"][0]
+    assert trial["model_calls"] == 7            # 3 supervisor, 3 orders, 1 policy
+    agents = trial["agents"]
+    assert {n: a["model_calls"] for n, a in agents["agents"].items()} == {
+        "supervisor": 3, "orders": 3, "policy": 1}
+    assert agents["delegations"] == 2 and agents["handoffs"] == 0
+    assert agents["duplicate_reads"] == 1       # orders looked ORD-1003 up twice
+    assert [b["specialists"] for b in agents["batches"]] == [2]
+    assert doc["max_model_calls"] == 59
+    from arl.evals import report
+
+    single = _framework_sweep(
+        tmp_path, monkeypatch, "graph_all", calls(look),
+        calls(("cancel_order", {"order_id": "ORD-1003", "reason": "Wrong lamp"})),
+        reply("Your order ORD-1003 is cancelled."))
+    assert all(t["agents"] is None for t in single["trials"])
+    text = report.full_report([single, doc])
+    assert "## Multi-agent cost against the first arm" in text
+    assert "| gpt-6-luna · supervisor · k2 | 1 | 2.33× | 2.33× | 2.33× |" in text
+    assert "| gpt-6-luna · supervisor · k2 | orders | 3.00 |" in text
+
+
+def test_the_supervisors_worst_case_is_bounded_by_its_pool(tmp_path):
+    est = estimate(TASKS, "gpt-6-luna", 1, tmp_path / "results", strategy="supervisor")
+    unbounded = runner.worst_trial_cost(est.input_tokens_per_call, 0.125, 0.5, 59)
+    assert est.per_trial_worst < unbounded
+    assert est.per_trial_worst > runner.PROFILES["guarded_all"].limits.max_usd
+    handoffs = estimate(TASKS, "gpt-6-luna", 1, tmp_path / "results", strategy="handoffs")
+    graph = estimate(TASKS, "gpt-6-luna", 1, tmp_path / "results", strategy="graph_all")
+    assert handoffs.per_trial_worst == graph.per_trial_worst   # one conversation, one cap
+    for name in ("supervisor", "handoffs"):
+        plan = runner.STRATEGIES[name]
+        assert plan.invariants and plan.cost_basis == "graph_all"
+
+
+def test_the_runner_does_not_load_the_framework_to_estimate():
+    import subprocess
+    import sys
+
+    code = ("import sys; from arl.evals import runner; from arl.evals.tasks import load_tasks; "
+            "runner.estimate(list(load_tasks()), 'gpt-6-luna', 1, strategy='supervisor'); "
+            "print('langgraph' in sys.modules)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         check=True).stdout.strip()
+    assert out == "False"
+
+
+def test_the_cli_knows_the_multi_agent_strategies_and_the_parallel_set(monkeypatch):
+    from arl import cli
+
+    monkeypatch.setattr("arl.llm.make_adapter", lambda model: (_ for _ in ()).throw(
+        AssertionError("a dry run must not build an adapter")))
+    for strategy in ("supervisor", "handoffs"):
+        result = CliRunner().invoke(cli.app, ["eval", "--dry-run", "--task-set", "parallel",
+                                              "-k", "1", "--strategy", strategy])
+        assert result.exit_code == 0, result.output
+        assert strategy in result.output and "8 tasks" in result.output

@@ -584,6 +584,112 @@ def paired_utility_table(a: dict, b: dict) -> str:
             f"{losses}, tied on {ties}. Two-sided sign test p = {p:.3f}: {verdict}.")
 
 
+# --- Multi-agent cost (Stage 8) -----------------------------------------------------------
+
+def _tokens(trial: dict) -> int:
+    """Input (cached included) + output, over every model call of every agent in the run."""
+    return trial["usage"].get("input_tokens", 0) + trial["usage"].get("output_tokens", 0)
+
+
+def _uncached(trial: dict) -> int:
+    return trial["usage"].get("input_tokens", 0) - trial["usage"].get("cached_input_tokens", 0)
+
+
+def _task_means(doc: dict, metric) -> dict[str, float]:
+    by_task: dict[str, list] = defaultdict(list)
+    for trial in doc["trials"]:
+        if not trial["error"]:
+            by_task[trial["task_id"]].append(metric(trial))
+    return {task: statistics.mean(values) for task, values in by_task.items()}
+
+
+def multiplier(ref: dict, arm: dict, metric) -> tuple[float | None, int]:
+    """sum over tasks of the arm's per-task mean / the same sum for the reference, on the
+    tasks both ran, matched on k (the first min(k) trials). Returns (ratio, tasks)."""
+    k = min(ref["trials_per_task"], arm["trials_per_task"])
+    a, b = _task_means(first_trials(arm, k), metric), _task_means(first_trials(ref, k), metric)
+    common = [t for t in b if t in a]
+    base = sum(b[t] for t in common)
+    return (sum(a[t] for t in common) / base if base else None), len(common)
+
+
+def has_agents(doc: dict) -> bool:
+    return any(t.get("agents") for t in doc["trials"])
+
+
+def multiplier_table(docs: list[dict]) -> str:
+    """Each arm against the first, per run and paired by task: tokens, dollars, model
+    calls, uncached input and p50 latency, as multiples of the reference."""
+    ref = docs[0]
+    metrics = {"tokens": _tokens, "$": lambda t: t["cost_usd"],
+               "model calls": lambda t: t["model_calls"], "uncached input": _uncached}
+    rows = []
+    for doc in docs:
+        cells, n = [], 0
+        for metric in metrics.values():
+            ratio, n = multiplier(ref, doc, metric)
+            cells.append("–" if ratio is None else f"{ratio:.2f}×")
+        k = min(ref["trials_per_task"], doc["trials_per_task"])
+        p50 = [summary(first_trials(d, k))["p50"] for d in (ref, doc)]
+        cells.append(f"{p50[1] / p50[0]:.2f}×" if all(p50) else "–")
+        mean_tokens = statistics.mean([_tokens(t) for t in doc["trials"] if not t["error"]] or [0])
+        max_tokens = max([_tokens(t) for t in doc["trials"]] or [0])
+        rows.append([arm_name(doc), n, *cells, f"{mean_tokens:,.0f}", f"{max_tokens:,}"])
+    return (_table(["arm", "tasks paired", "token multiplier", "cost multiplier",
+                    "model-call multiplier", "uncached-input multiplier", "p50 latency ratio",
+                    "tokens/run", "max tokens in a run"], rows)
+            + f"\nReference = {arm_name(ref)}. A multiplier is the sum over the paired tasks "
+              "of the arm's mean per run, divided by the same sum for the reference, on the "
+              "first min(k) trials of each task. Tokens are input (cached included) plus "
+              "output, over every model call of every agent.")
+
+
+def agent_table(docs: list[dict]) -> str:
+    """Where a multi-agent arm's calls, tokens and dollars went, by agent."""
+    rows = []
+    for doc in [d for d in docs if has_agents(d)]:
+        runs = [t for t in doc["trials"] if t.get("agents") and not t["error"]]
+        totals: dict[str, dict] = defaultdict(lambda: defaultdict(float))
+        for t in runs:
+            for name, a in t["agents"]["agents"].items():
+                for key, value in a.items():
+                    totals[name][key] += value
+        all_tokens = sum(a["input_tokens"] + a["output_tokens"] for a in totals.values()) or 1
+        all_cost = sum(a["cost_usd"] for a in totals.values()) or 1
+        for name, a in sorted(totals.items(), key=lambda kv: -kv[1]["cost_usd"]):
+            tokens = a["input_tokens"] + a["output_tokens"]
+            rows.append([arm_name(doc), name, f"{a['model_calls'] / len(runs):.2f}",
+                         f"{tokens / len(runs):,.0f}", _pct(tokens / all_tokens),
+                         _pct(a["cached_input_tokens"] / a["input_tokens"])
+                         if a["input_tokens"] else "–",
+                         f"${a['cost_usd'] / len(runs):.6f}", _pct(a["cost_usd"] / all_cost)])
+    return _table(["arm", "agent", "calls/run", "tokens/run", "share of tokens", "cached",
+                   "$/run", "share of $"], rows)
+
+
+def coordination_table(docs: list[dict]) -> str:
+    """The work of coordinating: delegations or handoffs, repeated lookups, and how much the
+    specialists asked together overlapped in time."""
+    rows = []
+    for doc in [d for d in docs if has_agents(d)]:
+        runs = [t["agents"] for t in doc["trials"] if t.get("agents") and not t["error"]]
+        batches = [b for r in runs for b in r["batches"]]
+        together = [b for b in batches if b["specialists"] > 1]
+        wall, total = sum(b["wall_ms"] for b in together), sum(b["sum_ms"] for b in together)
+        rows.append([arm_name(doc), f"{statistics.mean(r['delegations'] for r in runs):.2f}",
+                     f"{statistics.mean(r['handoffs'] for r in runs):.2f}",
+                     f"{statistics.mean(r['duplicate_reads'] for r in runs):.2f}",
+                     f"{statistics.mean(b['specialists'] for b in batches):.2f}"
+                     if batches else "–",
+                     f"{len(together)}",
+                     f"{wall / 1000:.1f} s of {total / 1000:.1f} s" if together else "–"])
+    return (_table(["arm", "delegations/run", "handoffs/run", "repeated lookups/run",
+                    "specialists per turn", "turns with several", "their wall time vs the sum"],
+                   rows)
+            + "\nRepeated lookups: successful read calls in a run identical to an earlier one "
+              "(same tool and arguments), by any agent.")
+
+
 def full_report(docs: list[dict]) -> str:
     parts = []
     regraded = [d for d in docs if d.get("regraded_with")]
@@ -623,6 +729,10 @@ def full_report(docs: list[dict]) -> str:
                   "## Approvals by task", approval_task_table(docs),
                   "## Other reviewers, replayed on the logged packets (counterfactual)",
                   reviewer_replay_table(docs)]
+    if any(has_agents(d) for d in docs):
+        parts += ["## Multi-agent cost against the first arm", multiplier_table(docs),
+                  "## Where the calls and tokens went, by agent", agent_table(docs),
+                  "## Coordination", coordination_table(docs)]
     for doc in docs:
         if doc["trials_per_task"] > 1:
             parts += [f"## Per-task variance: {arm_name(doc)}", variance_table(doc)]

@@ -1,0 +1,2874 @@
+{
+ "sweep_id": "20261029T154019Z-graph_all-gpt-6-luna-k1",
+ "phase": "phase-8",
+ "strategy": "graph_all",
+ "max_model_calls": 11,
+ "model": "gpt-6-luna",
+ "provider": "openai",
+ "task_set": "parallel",
+ "task_set_hash": "d644feff5a27",
+ "task_ids": [
+  "p01-late-orders-value",
+  "p02-return-window-value",
+  "p03-cancellable-value",
+  "p04-tracking-six",
+  "p05-status-by-email",
+  "p06-damage-two-orders",
+  "p07-refund-return-status",
+  "p08-returns-two-orders"
+ ],
+ "trials_per_task": 1,
+ "trials_planned": 8,
+ "trials_run": 8,
+ "max_output_tokens": 2000,
+ "prices": {
+  "input": 0.1,
+  "cached_input": 0.01,
+  "output": 0.5,
+  "cache_write": 0.125
+ },
+ "estimate": {
+  "model": "gpt-6-luna",
+  "trials": 8,
+  "input_tokens_per_call": 1871,
+  "per_trial_expected": 0.0002628037558685446,
+  "per_trial_worst": 0.023451463815789483,
+  "basis": "measured: mean of 213 earlier graph_all trials of gpt-6-luna",
+  "strategy": "graph_all",
+  "expected_usd": 0.002102430046948357,
+  "worst_usd": 0.18761171052631587
+ },
+ "cap_usd": 0.3,
+ "spent_usd": 0.004386365,
+ "status": "completed",
+ "started_at": "2026-10-29T15:40:19+00:00",
+ "finished_at": "2026-10-29T17:29:32+00:00",
+ "git_commit": "9176bd8-dirty",
+ "trials": [
+  {
+   "task_id": "p01-late-orders-value",
+   "category": "read",
+   "trial": 1,
+   "run_id": "20261029T154019Z-graph_all-gpt-6-luna-k1-p01-late-orders-value-k1",
+   "log": "runs/eval/20261029T154019Z-graph_all-gpt-6-luna-k1/20261029T154019Z-graph_all-gpt-6-luna-k1-p01-late-orders-value-k1.jsonl",
+   "success": true,
+   "error": null,
+   "model_calls": 2,
+   "tool_calls": 12,
+   "usage": {
+    "input_tokens": 5914,
+    "cached_input_tokens": 2099,
+    "output_tokens": 429,
+    "reasoning_tokens": 149,
+    "cache_write_tokens": 3809
+   },
+   "cost_usd": 0.000712215,
+   "latency_ms": 6324,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": true,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": true,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "no change, as expected"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 524",
+      "passed": true,
+      "detail": "found '524'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2010",
+      "passed": true,
+      "detail": "found 'ORD-2010'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2023",
+      "passed": true,
+      "detail": "found 'ORD-2023'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2035",
+      "passed": true,
+      "detail": "found 'ORD-2035'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2037",
+      "passed": true,
+      "detail": "found 'ORD-2037'"
+     },
+     {
+      "group": "facts",
+      "name": "must_not_say",
+      "passed": true,
+      "detail": "no forbidden phrase"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-1001)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2003)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2010)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2023)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2035)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2037)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of cancel_order, create_return, escalate_to_human, issue_refund, update_shipping_address"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "approvals": {
+    "requests": 0,
+    "flagged_calls": 0,
+    "approved": 0,
+    "rejected": 0,
+    "reviews": []
+   },
+   "agents": null,
+   "transcript": {
+    "task_id": "p01-late-orders-value",
+    "ticket": "Hi, I'm checking a batch of orders for our team: ORD-1001, ORD-2003, ORD-2010, ORD-2023, ORD-2035 and ORD-2037. Which of them are late, meaning past their estimated delivery date and still not delivered? Please list only the late ones, and tell me their combined order total.",
+    "model": "gpt-6-luna",
+    "strategy": "graph_all",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2102,
+       "cached_input_tokens": 0,
+       "output_tokens": 310,
+       "reasoning_tokens": 66,
+       "cache_write_tokens": 2099
+      },
+      "cost_usd": 0.000417675,
+      "latency_ms": 3909
+     },
+     {
+      "index": 2,
+      "stop": "end",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 3812,
+       "cached_input_tokens": 2099,
+       "output_tokens": 119,
+       "reasoning_tokens": 83,
+       "cache_write_tokens": 1710
+      },
+      "cost_usd": 0.00029454,
+      "latency_ms": 2401
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-1001\"}",
+      "result": {
+       "order": {
+        "id": "ORD-1001",
+        "customer_id": "CUS-0001",
+        "status": "shipped",
+        "placed_at": "2026-09-28",
+        "total_usd": "114.00",
+        "items": [
+         {
+          "sku": "SHOE-TR-42",
+          "name": "Trail running shoes",
+          "quantity": 1,
+          "unit_price_usd": "89.00"
+         },
+         {
+          "sku": "SOCK-WL-3P",
+          "name": "Wool socks 3-pack",
+          "quantity": 2,
+          "unit_price_usd": "12.50"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-1001\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-5001",
+        "order_id": "ORD-1001",
+        "carrier": "UPS",
+        "tracking_number": "1Z999AA10123456784",
+        "status": "in_transit",
+        "shipped_at": "2026-09-30",
+        "estimated_delivery": "2026-10-07",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2003\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2003",
+        "customer_id": "CUS-0101",
+        "status": "shipped",
+        "placed_at": "2026-10-01",
+        "total_usd": "258.00",
+        "items": [
+         {
+          "sku": "HDPH-BT-03",
+          "name": "Bluetooth headphones",
+          "quantity": 2,
+          "unit_price_usd": "129.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2003\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6003",
+        "order_id": "ORD-2003",
+        "carrier": "UPS",
+        "tracking_number": "231171247084",
+        "status": "in_transit",
+        "shipped_at": "2026-10-02",
+        "estimated_delivery": "2026-10-08",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2010\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2010",
+        "customer_id": "CUS-0104",
+        "status": "shipped",
+        "placed_at": "2026-09-16",
+        "total_usd": "96.00",
+        "items": [
+         {
+          "sku": "NOTE-A5-02",
+          "name": "A5 notebook 2-pack",
+          "quantity": 2,
+          "unit_price_usd": "11.00"
+         },
+         {
+          "sku": "PAN-CI-10",
+          "name": "Cast iron pan",
+          "quantity": 1,
+          "unit_price_usd": "45.00"
+         },
+         {
+          "sku": "CHRG-USB-C",
+          "name": "USB-C charger",
+          "quantity": 1,
+          "unit_price_usd": "29.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2010\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6010",
+        "order_id": "ORD-2010",
+        "carrier": "FedEx",
+        "tracking_number": "407302504465",
+        "status": "in_transit",
+        "shipped_at": "2026-09-17",
+        "estimated_delivery": "2026-09-23",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2023\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2023",
+        "customer_id": "CUS-0112",
+        "status": "shipped",
+        "placed_at": "2026-09-18",
+        "total_usd": "80.00",
+        "items": [
+         {
+          "sku": "NOTE-A5-02",
+          "name": "A5 notebook 2-pack",
+          "quantity": 2,
+          "unit_price_usd": "11.00"
+         },
+         {
+          "sku": "CHRG-USB-C",
+          "name": "USB-C charger",
+          "quantity": 2,
+          "unit_price_usd": "29.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2023\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6023",
+        "order_id": "ORD-2023",
+        "carrier": "UPS",
+        "tracking_number": "489724997658",
+        "status": "in_transit",
+        "shipped_at": "2026-09-19",
+        "estimated_delivery": "2026-09-25",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2035\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2035",
+        "customer_id": "CUS-0118",
+        "status": "shipped",
+        "placed_at": "2026-09-23",
+        "total_usd": "279.00",
+        "items": [
+         {
+          "sku": "TENT-2P-01",
+          "name": "Two-person tent",
+          "quantity": 1,
+          "unit_price_usd": "189.00"
+         },
+         {
+          "sku": "PAN-CI-10",
+          "name": "Cast iron pan",
+          "quantity": 2,
+          "unit_price_usd": "45.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2035\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6035",
+        "order_id": "ORD-2035",
+        "carrier": "USPS",
+        "tracking_number": "296160421523",
+        "status": "in_transit",
+        "shipped_at": "2026-09-24",
+        "estimated_delivery": "2026-09-30",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2037\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2037",
+        "customer_id": "CUS-0120",
+        "status": "shipped",
+        "placed_at": "2026-09-21",
+        "total_usd": "69.00",
+        "items": [
+         {
+          "sku": "NOTE-A5-02",
+          "name": "A5 notebook 2-pack",
+          "quantity": 1,
+          "unit_price_usd": "11.00"
+         },
+         {
+          "sku": "CHRG-USB-C",
+          "name": "USB-C charger",
+          "quantity": 2,
+          "unit_price_usd": "29.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2037\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6037",
+        "order_id": "ORD-2037",
+        "carrier": "UPS",
+        "tracking_number": "245328758319",
+        "status": "in_transit",
+        "shipped_at": "2026-09-22",
+        "estimated_delivery": "2026-09-27",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "ORD-2010, ORD-2023, ORD-2035, ORD-2037\n\nCombined order total: **$524.00**",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 6324,
+    "db_diff": {},
+    "error": null
+   }
+  },
+  {
+   "task_id": "p02-return-window-value",
+   "category": "read",
+   "trial": 1,
+   "run_id": "20261029T154019Z-graph_all-gpt-6-luna-k1-p02-return-window-value-k1",
+   "log": "runs/eval/20261029T154019Z-graph_all-gpt-6-luna-k1/20261029T154019Z-graph_all-gpt-6-luna-k1-p02-return-window-value-k1.jsonl",
+   "success": true,
+   "error": null,
+   "model_calls": 2,
+   "tool_calls": 12,
+   "usage": {
+    "input_tokens": 5874,
+    "cached_input_tokens": 4109,
+    "output_tokens": 507,
+    "reasoning_tokens": 227,
+    "cache_write_tokens": 1759
+   },
+   "cost_usd": 0.000515065,
+   "latency_ms": 6987,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": true,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": true,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "no change, as expected"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 536.99",
+      "passed": true,
+      "detail": "found '536.99'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-1002",
+      "passed": true,
+      "detail": "found 'ORD-1002'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2005",
+      "passed": true,
+      "detail": "found 'ORD-2005'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2027",
+      "passed": true,
+      "detail": "found 'ORD-2027'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2039",
+      "passed": true,
+      "detail": "found 'ORD-2039'"
+     },
+     {
+      "group": "facts",
+      "name": "must_not_say",
+      "passed": true,
+      "detail": "no forbidden phrase"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-1002)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2002)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2005)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2009)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2027)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2039)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of cancel_order, create_return, escalate_to_human, issue_refund, update_shipping_address"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "approvals": {
+    "requests": 0,
+    "flagged_calls": 0,
+    "approved": 0,
+    "rejected": 0,
+    "reviews": []
+   },
+   "agents": null,
+   "transcript": {
+    "task_id": "p02-return-window-value",
+    "ticket": "Six of our orders were delivered: ORD-1002, ORD-2002, ORD-2005, ORD-2009, ORD-2027 and ORD-2039. Which ones are still inside the 30-day return window today? Please list only those, and give me their combined order total.",
+    "model": "gpt-6-luna",
+    "strategy": "graph_all",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2091,
+       "cached_input_tokens": 2021,
+       "output_tokens": 305,
+       "reasoning_tokens": 61,
+       "cache_write_tokens": 67
+      },
+      "cost_usd": 0.000181385,
+      "latency_ms": 3972
+     },
+     {
+      "index": 2,
+      "stop": "end",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 3783,
+       "cached_input_tokens": 2088,
+       "output_tokens": 202,
+       "reasoning_tokens": 166,
+       "cache_write_tokens": 1692
+      },
+      "cost_usd": 0.00033368,
+      "latency_ms": 3001
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-1002\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-5002",
+        "order_id": "ORD-1002",
+        "carrier": "FedEx",
+        "tracking_number": "784412309915",
+        "status": "delivered",
+        "shipped_at": "2026-09-11",
+        "estimated_delivery": "2026-09-15",
+        "delivered_at": "2026-09-14"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-1002\"}",
+      "result": {
+       "order": {
+        "id": "ORD-1002",
+        "customer_id": "CUS-0001",
+        "status": "delivered",
+        "placed_at": "2026-09-10",
+        "total_usd": "79.99",
+        "items": [
+         {
+          "sku": "BLND-CT-01",
+          "name": "Countertop blender",
+          "quantity": 1,
+          "unit_price_usd": "79.99"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2002\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6002",
+        "order_id": "ORD-2002",
+        "carrier": "USPS",
+        "tracking_number": "536306578165",
+        "status": "delivered",
+        "shipped_at": "2026-08-31",
+        "estimated_delivery": "2026-09-03",
+        "delivered_at": "2026-09-03"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2002\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2002",
+        "customer_id": "CUS-0101",
+        "status": "delivered",
+        "placed_at": "2026-08-30",
+        "total_usd": "64.00",
+        "items": [
+         {
+          "sku": "PACK-DY-20",
+          "name": "Daypack 20L",
+          "quantity": 1,
+          "unit_price_usd": "64.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2005\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6005",
+        "order_id": "ORD-2005",
+        "carrier": "USPS",
+        "tracking_number": "369637315104",
+        "status": "delivered",
+        "shipped_at": "2026-09-08",
+        "estimated_delivery": "2026-09-12",
+        "delivered_at": "2026-09-12"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2005\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2005",
+        "customer_id": "CUS-0102",
+        "status": "delivered",
+        "placed_at": "2026-09-07",
+        "total_usd": "219.00",
+        "items": [
+         {
+          "sku": "PAN-CI-10",
+          "name": "Cast iron pan",
+          "quantity": 2,
+          "unit_price_usd": "45.00"
+         },
+         {
+          "sku": "HDPH-BT-03",
+          "name": "Bluetooth headphones",
+          "quantity": 1,
+          "unit_price_usd": "129.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2009\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6009",
+        "order_id": "ORD-2009",
+        "carrier": "UPS",
+        "tracking_number": "942750785275",
+        "status": "delivered",
+        "shipped_at": "2026-08-21",
+        "estimated_delivery": "2026-08-27",
+        "delivered_at": "2026-08-27"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2009\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2009",
+        "customer_id": "CUS-0104",
+        "status": "delivered",
+        "placed_at": "2026-08-20",
+        "total_usd": "109.00",
+        "items": [
+         {
+          "sku": "MAT-YG-06",
+          "name": "Yoga mat",
+          "quantity": 2,
+          "unit_price_usd": "38.00"
+         },
+         {
+          "sku": "BOTL-ST-01",
+          "name": "Steel water bottle",
+          "quantity": 1,
+          "unit_price_usd": "22.00"
+         },
+         {
+          "sku": "NOTE-A5-02",
+          "name": "A5 notebook 2-pack",
+          "quantity": 1,
+          "unit_price_usd": "11.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2027\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6027",
+        "order_id": "ORD-2027",
+        "carrier": "UPS",
+        "tracking_number": "890014156933",
+        "status": "delivered",
+        "shipped_at": "2026-09-20",
+        "estimated_delivery": "2026-09-23",
+        "delivered_at": "2026-09-23"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2027\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2027",
+        "customer_id": "CUS-0115",
+        "status": "delivered",
+        "placed_at": "2026-09-19",
+        "total_usd": "22.00",
+        "items": [
+         {
+          "sku": "NOTE-A5-02",
+          "name": "A5 notebook 2-pack",
+          "quantity": 2,
+          "unit_price_usd": "11.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2039\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6039",
+        "order_id": "ORD-2039",
+        "carrier": "FedEx",
+        "tracking_number": "101914802140",
+        "status": "delivered",
+        "shipped_at": "2026-09-03",
+        "estimated_delivery": "2026-09-07",
+        "delivered_at": "2026-09-07"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2039\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2039",
+        "customer_id": "CUS-0120",
+        "status": "delivered",
+        "placed_at": "2026-09-02",
+        "total_usd": "216.00",
+        "items": [
+         {
+          "sku": "NOTE-A5-02",
+          "name": "A5 notebook 2-pack",
+          "quantity": 1,
+          "unit_price_usd": "11.00"
+         },
+         {
+          "sku": "MAT-YG-06",
+          "name": "Yoga mat",
+          "quantity": 2,
+          "unit_price_usd": "38.00"
+         },
+         {
+          "sku": "HDPH-BT-03",
+          "name": "Bluetooth headphones",
+          "quantity": 1,
+          "unit_price_usd": "129.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "ORD-1002, ORD-2005, ORD-2027, ORD-2039  \nCombined order total: **$536.99**",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 6987,
+    "db_diff": {},
+    "error": null
+   }
+  },
+  {
+   "task_id": "p03-cancellable-value",
+   "category": "read",
+   "trial": 1,
+   "run_id": "20261029T154019Z-graph_all-gpt-6-luna-k1-p03-cancellable-value-k1",
+   "log": "runs/eval/20261029T154019Z-graph_all-gpt-6-luna-k1/20261029T154019Z-graph_all-gpt-6-luna-k1-p03-cancellable-value-k1.jsonl",
+   "success": true,
+   "error": null,
+   "model_calls": 2,
+   "tool_calls": 6,
+   "usage": {
+    "input_tokens": 5085,
+    "cached_input_tokens": 2087,
+    "output_tokens": 253,
+    "reasoning_tokens": 93,
+    "cache_write_tokens": 2992
+   },
+   "cost_usd": 0.0005219700000000001,
+   "latency_ms": 99065,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": true,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": true,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "no change, as expected"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 551.50",
+      "passed": true,
+      "detail": "found '551.50'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-1003",
+      "passed": true,
+      "detail": "found 'ORD-1003'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2031",
+      "passed": true,
+      "detail": "found 'ORD-2031'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2038",
+      "passed": true,
+      "detail": "found 'ORD-2038'"
+     },
+     {
+      "group": "facts",
+      "name": "must_not_say",
+      "passed": true,
+      "detail": "no forbidden phrase"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_order(order_id=ORD-1003)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_order(order_id=ORD-2006)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_order(order_id=ORD-2019)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_order(order_id=ORD-2031)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_order(order_id=ORD-2034)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_order(order_id=ORD-2038)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of cancel_order, create_return, escalate_to_human, issue_refund, update_shipping_address"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "approvals": {
+    "requests": 0,
+    "flagged_calls": 0,
+    "approved": 0,
+    "rejected": 0,
+    "reviews": []
+   },
+   "agents": null,
+   "transcript": {
+    "task_id": "p03-cancellable-value",
+    "ticket": "Before I decide anything: which of these orders can still be cancelled? ORD-1003, ORD-2006, ORD-2019, ORD-2031, ORD-2034 and ORD-2038. Please list only the ones that can, with their combined total. Don't cancel anything yet.",
+    "model": "gpt-6-luna",
+    "strategy": "graph_all",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2090,
+       "cached_input_tokens": 0,
+       "output_tokens": 159,
+       "reasoning_tokens": 29,
+       "cache_write_tokens": 2087
+      },
+      "cost_usd": 0.00034067500000000003,
+      "latency_ms": 97004
+     },
+     {
+      "index": 2,
+      "stop": "end",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2995,
+       "cached_input_tokens": 2087,
+       "output_tokens": 94,
+       "reasoning_tokens": 64,
+       "cache_write_tokens": 905
+      },
+      "cost_usd": 0.00018129500000000002,
+      "latency_ms": 2051
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-1003\"}",
+      "result": {
+       "order": {
+        "id": "ORD-1003",
+        "customer_id": "CUS-0002",
+        "status": "processing",
+        "placed_at": "2026-10-03",
+        "total_usd": "34.50",
+        "items": [
+         {
+          "sku": "LAMP-DK-02",
+          "name": "Desk lamp",
+          "quantity": 1,
+          "unit_price_usd": "34.50"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2006\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2006",
+        "customer_id": "CUS-0102",
+        "status": "cancelled",
+        "placed_at": "2026-09-29",
+        "total_usd": "348.00",
+        "items": [
+         {
+          "sku": "PAN-CI-10",
+          "name": "Cast iron pan",
+          "quantity": 2,
+          "unit_price_usd": "45.00"
+         },
+         {
+          "sku": "HDPH-BT-03",
+          "name": "Bluetooth headphones",
+          "quantity": 2,
+          "unit_price_usd": "129.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2019\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2019",
+        "customer_id": "CUS-0110",
+        "status": "shipped",
+        "placed_at": "2026-09-29",
+        "total_usd": "22.00",
+        "items": [
+         {
+          "sku": "NOTE-A5-02",
+          "name": "A5 notebook 2-pack",
+          "quantity": 2,
+          "unit_price_usd": "11.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2031\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2031",
+        "customer_id": "CUS-0116",
+        "status": "processing",
+        "placed_at": "2026-09-17",
+        "total_usd": "189.00",
+        "items": [
+         {
+          "sku": "TENT-2P-01",
+          "name": "Two-person tent",
+          "quantity": 1,
+          "unit_price_usd": "189.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2034\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2034",
+        "customer_id": "CUS-0117",
+        "status": "delivered",
+        "placed_at": "2026-09-27",
+        "total_usd": "76.00",
+        "items": [
+         {
+          "sku": "MAT-YG-06",
+          "name": "Yoga mat",
+          "quantity": 2,
+          "unit_price_usd": "38.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2038\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2038",
+        "customer_id": "CUS-0120",
+        "status": "processing",
+        "placed_at": "2026-10-04",
+        "total_usd": "328.00",
+        "items": [
+         {
+          "sku": "TENT-2P-01",
+          "name": "Two-person tent",
+          "quantity": 1,
+          "unit_price_usd": "189.00"
+         },
+         {
+          "sku": "NOTE-A5-02",
+          "name": "A5 notebook 2-pack",
+          "quantity": 1,
+          "unit_price_usd": "11.00"
+         },
+         {
+          "sku": "PACK-DY-20",
+          "name": "Daypack 20L",
+          "quantity": 2,
+          "unit_price_usd": "64.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "ORD-1003, ORD-2031, ORD-2038  \nCombined total: **$551.50**",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 99065,
+    "db_diff": {},
+    "error": null
+   }
+  },
+  {
+   "task_id": "p04-tracking-six",
+   "category": "read",
+   "trial": 1,
+   "run_id": "20261029T154019Z-graph_all-gpt-6-luna-k1-p04-tracking-six-k1",
+   "log": "runs/eval/20261029T154019Z-graph_all-gpt-6-luna-k1/20261029T154019Z-graph_all-gpt-6-luna-k1-p04-tracking-six-k1.jsonl",
+   "success": true,
+   "error": null,
+   "model_calls": 2,
+   "tool_calls": 6,
+   "usage": {
+    "input_tokens": 4821,
+    "cached_input_tokens": 4092,
+    "output_tokens": 238,
+    "reasoning_tokens": 0,
+    "cache_write_tokens": 723
+   },
+   "cost_usd": 0.000250895,
+   "latency_ms": 4452,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": true,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": true,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "no change, as expected"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 687037847892",
+      "passed": true,
+      "detail": "found '687037847892'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 356231378057",
+      "passed": true,
+      "detail": "found '356231378057'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 643389120696",
+      "passed": true,
+      "detail": "found '643389120696'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 214459481157",
+      "passed": true,
+      "detail": "found '214459481157'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 456747522506",
+      "passed": true,
+      "detail": "found '456747522506'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 449423999861",
+      "passed": true,
+      "detail": "found '449423999861'"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2004)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2011)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2017)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2022)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2024)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2029)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of cancel_order, create_return, escalate_to_human, issue_refund, update_shipping_address"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "approvals": {
+    "requests": 0,
+    "flagged_calls": 0,
+    "approved": 0,
+    "rejected": 0,
+    "reviews": []
+   },
+   "agents": null,
+   "transcript": {
+    "task_id": "p04-tracking-six",
+    "ticket": "Could you give me the carrier and the tracking number for each of these orders? ORD-2004, ORD-2011, ORD-2017, ORD-2022, ORD-2024 and ORD-2029.",
+    "model": "gpt-6-luna",
+    "strategy": "graph_all",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2074,
+       "cached_input_tokens": 2021,
+       "output_tokens": 134,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 50
+      },
+      "cost_usd": 9.376000000000001e-05,
+      "latency_ms": 2305
+     },
+     {
+      "index": 2,
+      "stop": "end",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2747,
+       "cached_input_tokens": 2071,
+       "output_tokens": 104,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 673
+      },
+      "cost_usd": 0.00015713499999999998,
+      "latency_ms": 2137
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2004\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6004",
+        "order_id": "ORD-2004",
+        "carrier": "FedEx",
+        "tracking_number": "687037847892",
+        "status": "in_transit",
+        "shipped_at": "2026-08-30",
+        "estimated_delivery": "2026-09-03",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2011\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6011",
+        "order_id": "ORD-2011",
+        "carrier": "UPS",
+        "tracking_number": "356231378057",
+        "status": "in_transit",
+        "shipped_at": "2026-09-11",
+        "estimated_delivery": "2026-09-15",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2017\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6017",
+        "order_id": "ORD-2017",
+        "carrier": "UPS",
+        "tracking_number": "643389120696",
+        "status": "in_transit",
+        "shipped_at": "2026-09-13",
+        "estimated_delivery": "2026-09-17",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2022\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6022",
+        "order_id": "ORD-2022",
+        "carrier": "USPS",
+        "tracking_number": "214459481157",
+        "status": "in_transit",
+        "shipped_at": "2026-08-15",
+        "estimated_delivery": "2026-08-18",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2024\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6024",
+        "order_id": "ORD-2024",
+        "carrier": "USPS",
+        "tracking_number": "456747522506",
+        "status": "in_transit",
+        "shipped_at": "2026-08-17",
+        "estimated_delivery": "2026-08-20",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2029\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6029",
+        "order_id": "ORD-2029",
+        "carrier": "UPS",
+        "tracking_number": "449423999861",
+        "status": "in_transit",
+        "shipped_at": "2026-09-04",
+        "estimated_delivery": "2026-09-10",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "| Order | Carrier | Tracking number |\n|---|---|---|\n| ORD-2004 | FedEx | 687037847892 |\n| ORD-2011 | UPS | 356231378057 |\n| ORD-2017 | UPS | 643389120696 |\n| ORD-2022 | USPS | 214459481157 |\n| ORD-2024 | USPS | 456747522506 |\n| ORD-2029 | UPS | 449423999861 |",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 4452,
+    "db_diff": {},
+    "error": null
+   }
+  },
+  {
+   "task_id": "p05-status-by-email",
+   "category": "read",
+   "trial": 1,
+   "run_id": "20261029T154019Z-graph_all-gpt-6-luna-k1-p05-status-by-email-k1",
+   "log": "runs/eval/20261029T154019Z-graph_all-gpt-6-luna-k1/20261029T154019Z-graph_all-gpt-6-luna-k1-p05-status-by-email-k1.jsonl",
+   "success": true,
+   "error": null,
+   "model_calls": 4,
+   "tool_calls": 5,
+   "usage": {
+    "input_tokens": 9174,
+    "cached_input_tokens": 8504,
+    "output_tokens": 251,
+    "reasoning_tokens": 22,
+    "cache_write_tokens": 658
+   },
+   "cost_usd": 0.00029399,
+   "latency_ms": 6272,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": true,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": true,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "no change, as expected"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2001",
+      "passed": true,
+      "detail": "found 'ORD-2001'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2002",
+      "passed": true,
+      "detail": "found 'ORD-2002'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: ORD-2003",
+      "passed": true,
+      "detail": "found 'ORD-2003'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 2026-09-03",
+      "passed": true,
+      "detail": "found 'september 3'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 2026-10-08",
+      "passed": true,
+      "detail": "found 'october 8'"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call find_customer",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call list_orders",
+      "passed": true,
+      "detail": "called in turn 2"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2001)",
+      "passed": true,
+      "detail": "called in turn 3"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2002)",
+      "passed": true,
+      "detail": "called in turn 3"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2003)",
+      "passed": true,
+      "detail": "called in turn 3"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of cancel_order, create_return, escalate_to_human, issue_refund, update_shipping_address"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "approvals": {
+    "requests": 0,
+    "flagged_calls": 0,
+    "approved": 0,
+    "rejected": 0,
+    "reviews": []
+   },
+   "agents": null,
+   "transcript": {
+    "task_id": "p05-status-by-email",
+    "ticket": "Hi, it's Farid (farid.castillo1@example.com). I don't have my order numbers to hand. Can you tell me where each of my orders is?",
+    "model": "gpt-6-luna",
+    "strategy": "graph_all",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2062,
+       "cached_input_tokens": 2021,
+       "output_tokens": 24,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 38
+      },
+      "cost_usd": 3.7260000000000006e-05,
+      "latency_ms": 988
+     },
+     {
+      "index": 2,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2129,
+       "cached_input_tokens": 2059,
+       "output_tokens": 26,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 67
+      },
+      "cost_usd": 4.2265e-05,
+      "latency_ms": 1221
+     },
+     {
+      "index": 3,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2301,
+       "cached_input_tokens": 2126,
+       "output_tokens": 101,
+       "reasoning_tokens": 22,
+       "cache_write_tokens": 172
+      },
+      "cost_usd": 9.356e-05,
+      "latency_ms": 2093
+     },
+     {
+      "index": 4,
+      "stop": "end",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2682,
+       "cached_input_tokens": 2298,
+       "output_tokens": 100,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 381
+      },
+      "cost_usd": 0.000120905,
+      "latency_ms": 1949
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "find_customer",
+      "arguments": "{\"email\":\"farid.castillo1@example.com\"}",
+      "result": {
+       "customer": {
+        "id": "CUS-0101",
+        "name": "Farid Castillo",
+        "email": "farid.castillo1@example.com"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 2,
+      "name": "list_orders",
+      "arguments": "{\"customer_id\":\"CUS-0101\",\"limit\":null}",
+      "result": {
+       "customer_id": "CUS-0101",
+       "total_orders": 3,
+       "orders": [
+        {
+         "id": "ORD-2003",
+         "status": "shipped",
+         "placed_at": "2026-10-01",
+         "total_usd": "258.00"
+        },
+        {
+         "id": "ORD-2001",
+         "status": "delivered",
+         "placed_at": "2026-09-28",
+         "total_usd": "339.00"
+        },
+        {
+         "id": "ORD-2002",
+         "status": "delivered",
+         "placed_at": "2026-08-30",
+         "total_usd": "64.00"
+        }
+       ]
+      },
+      "is_error": false
+     },
+     {
+      "turn": 3,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2003\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6003",
+        "order_id": "ORD-2003",
+        "carrier": "UPS",
+        "tracking_number": "231171247084",
+        "status": "in_transit",
+        "shipped_at": "2026-10-02",
+        "estimated_delivery": "2026-10-08",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 3,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2001\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6001",
+        "order_id": "ORD-2001",
+        "carrier": "UPS",
+        "tracking_number": "199817887524",
+        "status": "delivered",
+        "shipped_at": "2026-09-29",
+        "estimated_delivery": "2026-10-05",
+        "delivered_at": "2026-10-05"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 3,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2002\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6002",
+        "order_id": "ORD-2002",
+        "carrier": "USPS",
+        "tracking_number": "536306578165",
+        "status": "delivered",
+        "shipped_at": "2026-08-31",
+        "estimated_delivery": "2026-09-03",
+        "delivered_at": "2026-09-03"
+       }
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "You have three orders:\n\n- **ORD-2003:** In transit with UPS, tracking **231171247084**. Estimated delivery: **October 8, 2026**.\n- **ORD-2001:** Delivered by UPS on **October 5, 2026**. Tracking **199817887524**.\n- **ORD-2002:** Delivered by USPS on **September 3, 2026**. Tracking **536306578165**.",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 6272,
+    "db_diff": {},
+    "error": null
+   }
+  },
+  {
+   "task_id": "p06-damage-two-orders",
+   "category": "write",
+   "trial": 1,
+   "run_id": "20261029T154019Z-graph_all-gpt-6-luna-k1-p06-damage-two-orders-k1",
+   "log": "runs/eval/20261029T154019Z-graph_all-gpt-6-luna-k1/20261029T154019Z-graph_all-gpt-6-luna-k1-p06-damage-two-orders-k1.jsonl",
+   "success": false,
+   "error": null,
+   "model_calls": 4,
+   "tool_calls": 7,
+   "usage": {
+    "input_tokens": 12533,
+    "cached_input_tokens": 10617,
+    "output_tokens": 1401,
+    "reasoning_tokens": 1012,
+    "cache_write_tokens": 1904
+   },
+   "cost_usd": 0.00104587,
+   "latency_ms": 19007,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": false,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": false,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "the expected change"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 22.00",
+      "passed": false,
+      "detail": "none of ['22.00'] in the reply"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 2026-09-10",
+      "passed": true,
+      "detail": "found 'september 10'"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call issue_refund(order_id=ORD-2027)",
+      "passed": true,
+      "detail": "called in turn 2"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call escalate_to_human",
+      "passed": true,
+      "detail": "called in turn 3"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2028)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2029)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of cancel_order, create_return"
+     },
+     {
+      "group": "trajectory",
+      "name": "order get_shipment before issue_refund",
+      "passed": true,
+      "detail": "get_shipment in turn 1, issue_refund in turn 2"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "approvals": {
+    "requests": 0,
+    "flagged_calls": 0,
+    "approved": 0,
+    "rejected": 0,
+    "reviews": []
+   },
+   "agents": null,
+   "transcript": {
+    "task_id": "p06-damage-two-orders",
+    "ticket": "Hi, Grace here (grace.brandt15@example.com). Three things. The two notebooks in ORD-2027 arrived soaked and ruined. The tent from ORD-2028 has a snapped pole. Please refund both. And where is ORD-2029?",
+    "model": "gpt-6-luna",
+    "strategy": "graph_all",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2081,
+       "cached_input_tokens": 2021,
+       "output_tokens": 245,
+       "reasoning_tokens": 130,
+       "cache_write_tokens": 57
+      },
+      "cost_usd": 0.000150135,
+      "latency_ms": 3053
+     },
+     {
+      "index": 2,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2820,
+       "cached_input_tokens": 2078,
+       "output_tokens": 753,
+       "reasoning_tokens": 700,
+       "cache_write_tokens": 739
+      },
+      "cost_usd": 0.000489955,
+      "latency_ms": 9212
+     },
+     {
+      "index": 3,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 3704,
+       "cached_input_tokens": 2817,
+       "output_tokens": 161,
+       "reasoning_tokens": 57,
+       "cache_write_tokens": 884
+      },
+      "cost_usd": 0.00021947,
+      "latency_ms": 2822
+     },
+     {
+      "index": 4,
+      "stop": "end",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 3928,
+       "cached_input_tokens": 3701,
+       "output_tokens": 242,
+       "reasoning_tokens": 125,
+       "cache_write_tokens": 224
+      },
+      "cost_usd": 0.00018631,
+      "latency_ms": 3905
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2027\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2027",
+        "customer_id": "CUS-0115",
+        "status": "delivered",
+        "placed_at": "2026-09-19",
+        "total_usd": "22.00",
+        "items": [
+         {
+          "sku": "NOTE-A5-02",
+          "name": "A5 notebook 2-pack",
+          "quantity": 2,
+          "unit_price_usd": "11.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2027\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6027",
+        "order_id": "ORD-2027",
+        "carrier": "UPS",
+        "tracking_number": "890014156933",
+        "status": "delivered",
+        "shipped_at": "2026-09-20",
+        "estimated_delivery": "2026-09-23",
+        "delivered_at": "2026-09-23"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2028\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2028",
+        "customer_id": "CUS-0115",
+        "status": "delivered",
+        "placed_at": "2026-08-24",
+        "total_usd": "189.00",
+        "items": [
+         {
+          "sku": "TENT-2P-01",
+          "name": "Two-person tent",
+          "quantity": 1,
+          "unit_price_usd": "189.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2028\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6028",
+        "order_id": "ORD-2028",
+        "carrier": "UPS",
+        "tracking_number": "534195962612",
+        "status": "delivered",
+        "shipped_at": "2026-08-25",
+        "estimated_delivery": "2026-08-31",
+        "delivered_at": "2026-08-31"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2029\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6029",
+        "order_id": "ORD-2029",
+        "carrier": "UPS",
+        "tracking_number": "449423999861",
+        "status": "in_transit",
+        "shipped_at": "2026-09-04",
+        "estimated_delivery": "2026-09-10",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 2,
+      "name": "issue_refund",
+      "arguments": "{\"order_id\":\"ORD-2027\",\"amount_usd\":\"22.00\",\"reason\":\"Refund for the two notebook units reported soaked and ruined within 30 days of delivery.\"}",
+      "result": {
+       "refund": {
+        "id": "REF-9002",
+        "order_id": "ORD-2027",
+        "amount_usd": "22.00",
+        "reason": "Refund for the two notebook units reported soaked and ruined within 30 days of delivery.",
+        "status": "issued",
+        "created_at": "2026-10-05"
+       },
+       "order_total_usd": "22.00",
+       "refunded_to_date_usd": "22.00",
+       "note": "The refund goes to the original payment method and arrives in 5 to 7 business days."
+      },
+      "is_error": false
+     },
+     {
+      "turn": 3,
+      "name": "escalate_to_human",
+      "arguments": "{\"category\":\"policy_exception\",\"summary\":\"Grace requests a refund for the snapped tent in ORD-2028. It was delivered on 2026-08-31, more than 30 days before the report on 2026-10-05, so this is outside the refund policy and needs human review; no tent refund was issued.\",\"order_id\":\"ORD-2028\",\"customer_id\":\"CUS-0115\"}",
+      "result": {
+       "escalation": {
+        "id": "ESC-3001",
+        "category": "policy_exception",
+        "status": "open"
+       },
+       "note": "A member of the support team will reply to the customer within one business day."
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "The $22 refund for the notebooks in ORD-2027 has been issued to your original payment method; it should arrive in 5\u20137 business days.\n\nThe tent in ORD-2028 was delivered on August 31, so the damage report is outside the 30-day refund window. I\u2019ve escalated it for review, and support will reply within one business day.\n\nORD-2029 is in transit with UPS. Tracking number: 449423999861. The estimated delivery date was September 10, and no delivery date is recorded.",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 19007,
+    "db_diff": {
+     "escalations": {
+      "insert": [
+       {
+        "id": "ESC-3001",
+        "category": "policy_exception",
+        "summary": "Grace requests a refund for the snapped tent in ORD-2028. It was delivered on 2026-08-31, more than 30 days before the report on 2026-10-05, so this is outside the refund policy and needs human review; no tent refund was issued.",
+        "order_id": "ORD-2028",
+        "customer_id": "CUS-0115",
+        "status": "open",
+        "created_at": "2026-10-05"
+       }
+      ],
+      "delete": [],
+      "update": {}
+     },
+     "refunds": {
+      "insert": [
+       {
+        "id": "REF-9002",
+        "order_id": "ORD-2027",
+        "amount_cents": 2200,
+        "reason": "Refund for the two notebook units reported soaked and ruined within 30 days of delivery.",
+        "status": "issued",
+        "created_at": "2026-10-05"
+       }
+      ],
+      "delete": [],
+      "update": {}
+     }
+    },
+    "error": null
+   }
+  },
+  {
+   "task_id": "p07-refund-return-status",
+   "category": "write",
+   "trial": 1,
+   "run_id": "20261029T154019Z-graph_all-gpt-6-luna-k1-p07-refund-return-status-k1",
+   "log": "runs/eval/20261029T154019Z-graph_all-gpt-6-luna-k1/20261029T154019Z-graph_all-gpt-6-luna-k1-p07-refund-return-status-k1.jsonl",
+   "success": true,
+   "error": null,
+   "model_calls": 3,
+   "tool_calls": 6,
+   "usage": {
+    "input_tokens": 8057,
+    "cached_input_tokens": 6874,
+    "output_tokens": 675,
+    "reasoning_tokens": 366,
+    "cache_write_tokens": 1174
+   },
+   "cost_usd": 0.00055389,
+   "latency_ms": 10367,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": true,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": true,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "the expected change"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 45.00",
+      "passed": true,
+      "detail": "found '45.00'"
+     },
+     {
+      "group": "facts",
+      "name": "fact: 2026-09-03",
+      "passed": true,
+      "detail": "found 'september 3'"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call issue_refund(order_id=ORD-2005)",
+      "passed": true,
+      "detail": "called in turn 2"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call create_return(order_id=ORD-2005)",
+      "passed": true,
+      "detail": "called in turn 2"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2005)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2004)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of cancel_order"
+     },
+     {
+      "group": "trajectory",
+      "name": "order get_shipment before issue_refund",
+      "passed": true,
+      "detail": "get_shipment in turn 1, issue_refund in turn 2"
+     },
+     {
+      "group": "trajectory",
+      "name": "order get_shipment before create_return",
+      "passed": true,
+      "detail": "get_shipment in turn 1, create_return in turn 2"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "approvals": {
+    "requests": 0,
+    "flagged_calls": 0,
+    "approved": 0,
+    "rejected": 0,
+    "reviews": []
+   },
+   "agents": null,
+   "transcript": {
+    "task_id": "p07-refund-return-status",
+    "ticket": "Hello, jonas.eriksen2@example.com here. In ORD-2005 one of the two cast iron pans arrived cracked, please refund it. The headphones from that order are still sealed and I'd like to send them back. Also, ORD-2004 still hasn't arrived: when was it due?",
+    "model": "gpt-6-luna",
+    "strategy": "graph_all",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2090,
+       "cached_input_tokens": 2021,
+       "output_tokens": 308,
+       "reasoning_tokens": 209,
+       "cache_write_tokens": 66
+      },
+      "cost_usd": 0.00018276,
+      "latency_ms": 4347
+     },
+     {
+      "index": 2,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2769,
+       "cached_input_tokens": 2087,
+       "output_tokens": 205,
+       "reasoning_tokens": 92,
+       "cache_write_tokens": 679
+      },
+      "cost_usd": 0.000208545,
+      "latency_ms": 3632
+     },
+     {
+      "index": 3,
+      "stop": "end",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 3198,
+       "cached_input_tokens": 2766,
+       "output_tokens": 162,
+       "reasoning_tokens": 65,
+       "cache_write_tokens": 429
+      },
+      "cost_usd": 0.000162585,
+      "latency_ms": 2366
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "find_customer",
+      "arguments": "{\"email\":\"jonas.eriksen2@example.com\"}",
+      "result": {
+       "customer": {
+        "id": "CUS-0102",
+        "name": "Jonas Eriksen",
+        "email": "jonas.eriksen2@example.com"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2005\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2005",
+        "customer_id": "CUS-0102",
+        "status": "delivered",
+        "placed_at": "2026-09-07",
+        "total_usd": "219.00",
+        "items": [
+         {
+          "sku": "PAN-CI-10",
+          "name": "Cast iron pan",
+          "quantity": 2,
+          "unit_price_usd": "45.00"
+         },
+         {
+          "sku": "HDPH-BT-03",
+          "name": "Bluetooth headphones",
+          "quantity": 1,
+          "unit_price_usd": "129.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2005\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6005",
+        "order_id": "ORD-2005",
+        "carrier": "USPS",
+        "tracking_number": "369637315104",
+        "status": "delivered",
+        "shipped_at": "2026-09-08",
+        "estimated_delivery": "2026-09-12",
+        "delivered_at": "2026-09-12"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2004\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6004",
+        "order_id": "ORD-2004",
+        "carrier": "FedEx",
+        "tracking_number": "687037847892",
+        "status": "in_transit",
+        "shipped_at": "2026-08-30",
+        "estimated_delivery": "2026-09-03",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 2,
+      "name": "issue_refund",
+      "arguments": "{\"order_id\":\"ORD-2005\",\"amount_usd\":\"45.00\",\"reason\":\"One cast iron pan arrived cracked and was reported within 30 days of delivery.\"}",
+      "result": {
+       "refund": {
+        "id": "REF-9002",
+        "order_id": "ORD-2005",
+        "amount_usd": "45.00",
+        "reason": "One cast iron pan arrived cracked and was reported within 30 days of delivery.",
+        "status": "issued",
+        "created_at": "2026-10-05"
+       },
+       "order_total_usd": "219.00",
+       "refunded_to_date_usd": "45.00",
+       "note": "The refund goes to the original payment method and arrives in 5 to 7 business days."
+      },
+      "is_error": false
+     },
+     {
+      "turn": 2,
+      "name": "create_return",
+      "arguments": "{\"order_id\":\"ORD-2005\",\"sku\":\"HDPH-BT-03\",\"quantity\":1,\"condition\":\"unopened\",\"reason\":\"Returning the sealed headphones.\"}",
+      "result": {
+       "return": {
+        "id": "RMA-7001",
+        "order_id": "ORD-2005",
+        "sku": "HDPH-BT-03",
+        "quantity": 1,
+        "condition": "unopened",
+        "status": "authorized"
+       },
+       "note": "A prepaid return label is emailed to the customer. The warehouse issues the refund when the item arrives; do not issue it yourself."
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "I issued a **$45.00 refund** for the cracked pan to your original payment method; it should arrive in **5\u20137 business days**. The return for your sealed headphones is authorized, and a prepaid label will be emailed to you. The warehouse will refund them once they arrive.\n\nORD-2004 had an estimated delivery date of **September 3, 2026**. Its shipment is still listed as **in transit**.",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 10367,
+    "db_diff": {
+     "refunds": {
+      "insert": [
+       {
+        "id": "REF-9002",
+        "order_id": "ORD-2005",
+        "amount_cents": 4500,
+        "reason": "One cast iron pan arrived cracked and was reported within 30 days of delivery.",
+        "status": "issued",
+        "created_at": "2026-10-05"
+       }
+      ],
+      "delete": [],
+      "update": {}
+     },
+     "returns": {
+      "insert": [
+       {
+        "id": "RMA-7001",
+        "order_id": "ORD-2005",
+        "sku": "HDPH-BT-03",
+        "quantity": 1,
+        "condition": "unopened",
+        "reason": "Returning the sealed headphones.",
+        "status": "authorized",
+        "created_at": "2026-10-05"
+       }
+      ],
+      "delete": [],
+      "update": {}
+     }
+    },
+    "error": null
+   }
+  },
+  {
+   "task_id": "p08-returns-two-orders",
+   "category": "write",
+   "trial": 1,
+   "run_id": "20261029T154019Z-graph_all-gpt-6-luna-k1-p08-returns-two-orders-k1",
+   "log": "runs/eval/20261029T154019Z-graph_all-gpt-6-luna-k1/20261029T154019Z-graph_all-gpt-6-luna-k1-p08-returns-two-orders-k1.jsonl",
+   "success": true,
+   "error": null,
+   "model_calls": 3,
+   "tool_calls": 6,
+   "usage": {
+    "input_tokens": 8102,
+    "cached_input_tokens": 6957,
+    "output_tokens": 560,
+    "reasoning_tokens": 316,
+    "cache_write_tokens": 1136
+   },
+   "cost_usd": 0.00049247,
+   "latency_ms": 8653,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": true,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": true,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "the expected change"
+     },
+     {
+      "group": "facts",
+      "name": "fact: in transit",
+      "passed": true,
+      "detail": "found 'in transit'"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call create_return(order_id=ORD-2020)",
+      "passed": true,
+      "detail": "called in turn 2"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2020)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call get_shipment(order_id=ORD-2021)",
+      "passed": true,
+      "detail": "called in turn 1"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of cancel_order, issue_refund"
+     },
+     {
+      "group": "trajectory",
+      "name": "order get_shipment before create_return",
+      "passed": true,
+      "detail": "get_shipment in turn 1, create_return in turn 2"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "approvals": {
+    "requests": 0,
+    "flagged_calls": 0,
+    "approved": 0,
+    "rejected": 0,
+    "reviews": []
+   },
+   "agents": null,
+   "transcript": {
+    "task_id": "p08-returns-two-orders",
+    "ticket": "Hi, Jonas (jonas.abara11@example.com). I'd like to send back two things that are still sealed: the daypack from ORD-2020 and the headphones from ORD-2021.",
+    "model": "gpt-6-luna",
+    "strategy": "graph_all",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2069,
+       "cached_input_tokens": 2021,
+       "output_tokens": 289,
+       "reasoning_tokens": 173,
+       "cache_write_tokens": 45
+      },
+      "cost_usd": 0.00017063499999999998,
+      "latency_ms": 3794
+     },
+     {
+      "index": 2,
+      "stop": "tool_calls",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 2873,
+       "cached_input_tokens": 2066,
+       "output_tokens": 193,
+       "reasoning_tokens": 143,
+       "cache_write_tokens": 804
+      },
+      "cost_usd": 0.00021796,
+      "latency_ms": 3227
+     },
+     {
+      "index": 3,
+      "stop": "end",
+      "provider_stop": "completed",
+      "usage": {
+       "input_tokens": 3160,
+       "cached_input_tokens": 2870,
+       "output_tokens": 78,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 287
+      },
+      "cost_usd": 0.000103875,
+      "latency_ms": 1610
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "find_customer",
+      "arguments": "{\"email\":\"jonas.abara11@example.com\"}",
+      "result": {
+       "customer": {
+        "id": "CUS-0111",
+        "name": "Jonas Abara",
+        "email": "jonas.abara11@example.com"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2020\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2020",
+        "customer_id": "CUS-0111",
+        "status": "delivered",
+        "placed_at": "2026-09-27",
+        "total_usd": "176.00",
+        "items": [
+         {
+          "sku": "NOTE-A5-02",
+          "name": "A5 notebook 2-pack",
+          "quantity": 2,
+          "unit_price_usd": "11.00"
+         },
+         {
+          "sku": "PAN-CI-10",
+          "name": "Cast iron pan",
+          "quantity": 2,
+          "unit_price_usd": "45.00"
+         },
+         {
+          "sku": "PACK-DY-20",
+          "name": "Daypack 20L",
+          "quantity": 1,
+          "unit_price_usd": "64.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2020\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6020",
+        "order_id": "ORD-2020",
+        "carrier": "FedEx",
+        "tracking_number": "917767729486",
+        "status": "delivered",
+        "shipped_at": "2026-09-28",
+        "estimated_delivery": "2026-10-04",
+        "delivered_at": "2026-10-04"
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\":\"ORD-2021\"}",
+      "result": {
+       "order": {
+        "id": "ORD-2021",
+        "customer_id": "CUS-0111",
+        "status": "shipped",
+        "placed_at": "2026-09-29",
+        "total_usd": "129.00",
+        "items": [
+         {
+          "sku": "HDPH-BT-03",
+          "name": "Bluetooth headphones",
+          "quantity": 1,
+          "unit_price_usd": "129.00"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 1,
+      "name": "get_shipment",
+      "arguments": "{\"order_id\":\"ORD-2021\"}",
+      "result": {
+       "shipment": {
+        "id": "SHP-6021",
+        "order_id": "ORD-2021",
+        "carrier": "USPS",
+        "tracking_number": "614987418377",
+        "status": "in_transit",
+        "shipped_at": "2026-09-30",
+        "estimated_delivery": "2026-10-04",
+        "delivered_at": null
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 2,
+      "name": "create_return",
+      "arguments": "{\"order_id\":\"ORD-2020\",\"sku\":\"PACK-DY-20\",\"quantity\":1,\"condition\":\"unopened\",\"reason\":\"Returning the sealed daypack.\"}",
+      "result": {
+       "return": {
+        "id": "RMA-7001",
+        "order_id": "ORD-2020",
+        "sku": "PACK-DY-20",
+        "quantity": 1,
+        "condition": "unopened",
+        "status": "authorized"
+       },
+       "note": "A prepaid return label is emailed to the customer. The warehouse issues the refund when the item arrives; do not issue it yourself."
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "I authorized the return of the sealed daypack from ORD-2020. A prepaid label will be emailed to you, and the warehouse will issue the refund once it receives the item.\n\nORD-2021\u2019s headphones are still in transit, so I can\u2019t authorize a return yet. Once they\u2019re delivered, you can request a return within 30 days of delivery.",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 8653,
+    "db_diff": {
+     "returns": {
+      "insert": [
+       {
+        "id": "RMA-7001",
+        "order_id": "ORD-2020",
+        "sku": "PACK-DY-20",
+        "quantity": 1,
+        "condition": "unopened",
+        "reason": "Returning the sealed daypack.",
+        "status": "authorized",
+        "created_at": "2026-10-05"
+       }
+      ],
+      "delete": [],
+      "update": {}
+     }
+    },
+    "error": null
+   }
+  }
+ ]
+}

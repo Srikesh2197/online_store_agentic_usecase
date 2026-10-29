@@ -1,0 +1,38 @@
+id: p04-tracking-six
+title: Carrier and tracking number for six orders
+category: read
+provenance: parallel-v1
+ticket: |
+  Could you give me the carrier and the tracking number for each of these orders? ORD-2004, ORD-2011, ORD-2017, ORD-2022, ORD-2024 and ORD-2029.
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["687037847892"]
+      - ["356231378057"]
+      - ["643389120696"]
+      - ["214459481157"]
+      - ["456747522506"]
+      - ["449423999861"]
+trajectory:
+  must_call:
+    - {tool: get_shipment, args: {order_id: ORD-2004}}
+    - {tool: get_shipment, args: {order_id: ORD-2011}}
+    - {tool: get_shipment, args: {order_id: ORD-2017}}
+    - {tool: get_shipment, args: {order_id: ORD-2022}}
+    - {tool: get_shipment, args: {order_id: ORD-2024}}
+    - {tool: get_shipment, args: {order_id: ORD-2029}}
+  must_not_call: ["@write", "@escalate"]
+reference:
+  turns:
+    - [[get_shipment, {order_id: ORD-2004}], [get_shipment, {order_id: ORD-2011}],
+       [get_shipment, {order_id: ORD-2017}], [get_shipment, {order_id: ORD-2022}],
+       [get_shipment, {order_id: ORD-2024}], [get_shipment, {order_id: ORD-2029}]]
+  reply: >
+    ORD-2004: FedEx 687037847892. ORD-2011: UPS 356231378057. ORD-2017: UPS 643389120696.
+    ORD-2022: USPS 214459481157. ORD-2024: USPS 456747522506. ORD-2029: UPS 449423999861.
+    All six are still in transit and past their estimated delivery dates.
+notes: >-
+  Pure fan-out: one lookup per item, no judgement. The control task of the set. Tracking
+  numbers are unique digit strings, so the facts cannot match by accident.

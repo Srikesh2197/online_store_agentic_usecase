@@ -1,0 +1,42 @@
+id: p02-return-window-value
+title: Which of six delivered orders are still inside the return window, and their value
+category: read
+provenance: parallel-v1
+ticket: |
+  Six of our orders were delivered: ORD-1002, ORD-2002, ORD-2005, ORD-2009, ORD-2027 and ORD-2039. Which ones are still inside the 30-day return window today? Please list only those, and give me their combined order total.
+expected:
+  disposition: resolved
+  db_change: {}
+  reply:
+    facts:
+      - ["536.99"]
+      - ["ORD-1002"]
+      - ["ORD-2005"]
+      - ["ORD-2027"]
+      - ["ORD-2039"]
+    must_not_say: ["ORD-2002", "ORD-2009"]
+trajectory:
+  must_call:
+    - {tool: get_shipment, args: {order_id: ORD-1002}}
+    - {tool: get_shipment, args: {order_id: ORD-2002}}
+    - {tool: get_shipment, args: {order_id: ORD-2005}}
+    - {tool: get_shipment, args: {order_id: ORD-2009}}
+    - {tool: get_shipment, args: {order_id: ORD-2027}}
+    - {tool: get_shipment, args: {order_id: ORD-2039}}
+  must_not_call: ["@write", "@escalate"]
+reference:
+  turns:
+    - [[get_shipment, {order_id: ORD-1002}], [get_shipment, {order_id: ORD-2002}],
+       [get_shipment, {order_id: ORD-2005}], [get_shipment, {order_id: ORD-2009}],
+       [get_shipment, {order_id: ORD-2027}], [get_shipment, {order_id: ORD-2039}],
+       [get_order, {order_id: ORD-1002}], [get_order, {order_id: ORD-2005}],
+       [get_order, {order_id: ORD-2027}], [get_order, {order_id: ORD-2039}]]
+  reply: >
+    Four are still inside the 30 days from delivery: ORD-1002 (delivered 2026-09-14),
+    ORD-2005 (2026-09-12), ORD-2027 (2026-09-23) and ORD-2039 (2026-09-07). Their combined
+    order total is $536.99.
+notes: >-
+  The window counts from the delivery date, which only get_shipment returns. Delivered:
+  ORD-1002 09-14 (21 days), ORD-2005 09-12 (23), ORD-2027 09-23 (12), ORD-2039 09-07 (28),
+  ORD-2002 09-03 (32, outside), ORD-2009 08-27 (39, outside). Every margin is at least two
+  days. Totals: 79.99 + 219.00 + 22.00 + 216.00 = 536.99.

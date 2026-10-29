@@ -245,7 +245,10 @@ def eval_(
         raise typer.BadParameter(str(exc), param_hint="--tasks") from exc
     est = runner.estimate(chosen, model, trials, strategy=plan.name)
     spent = runner.phase_spent()
-    worst_basis = (f"the ${plan.max_usd:.4f} per-run budget plus 3 calls past it"
+    worst_basis = ((f"the ${plan.max_usd:.4f} run pool, plus what up to 8 specialists and "
+                    "the supervisor can still call once it trips"
+                    if plan.worst_case else
+                    f"the ${plan.max_usd:.4f} per-run budget plus 3 calls past it")
                    if plan.max_usd else
                    f"{plan.max_calls} calls, every one at max_tokens, no cache")
     typer.secho("===== ESTIMATE =====", bold=True)
