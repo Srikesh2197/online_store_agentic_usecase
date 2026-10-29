@@ -55,6 +55,8 @@ class Tracer:
         self._lf = langfuse
         self._root = None
         self._seq = 0
+        # False when a LangChain callback records the model calls in Langfuse instead.
+        self.mirror_model_calls = True
 
     def event(self, type: str, **fields) -> None:
         self._seq += 1
@@ -98,6 +100,20 @@ class Tracer:
         if self._lf:
             self._lf.flush()
 
+    def langchain_callbacks(self) -> list:
+        """Callbacks for a LangChain or LangGraph run inside this tracer's run.
+
+        With Langfuse on, its LangChain handler attaches to the open run span and records the
+        graph's nodes and each model generation there, so this tracer stops mirroring model
+        calls itself (nothing is counted twice). The JSONL log is written as always.
+        """
+        if not self._lf:
+            return []
+        from langfuse.langchain import CallbackHandler
+
+        self.mirror_model_calls = False
+        return [CallbackHandler()]
+
     def end_run(self, *, status: str, reply: str, stop: str, model_calls: int, tool_calls: int,
                 usage: Usage, cost_usd: float, latency_ms: int) -> None:
         self.event(
@@ -121,7 +137,7 @@ class Tracer:
         self.event("model_request", call_index=index, provider=provider, request=request)
         with ExitStack() as stack:
             generation = None
-            if self._lf:
+            if self._lf and self.mirror_model_calls:
                 generation = stack.enter_context(
                     self._lf.start_as_current_observation(
                         name=f"model_call_{index}",

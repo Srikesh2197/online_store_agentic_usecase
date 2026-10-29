@@ -341,3 +341,66 @@ Spend: **$0.169**, including $0.005 for a sweep killed when a session ended.
 - Does the prompt-only result hold on Haiku 5.5? The optional cross-check (12 × 1 per arm, about $0.03) was not run.
 - Should the refund cap be per item? a14 shows the per-order cap allowing $98 for a $38 item.
 - `hand_loop`'s false "Nothing was changed": fix it in a later rung, or keep it as the measured baseline?
+
+## Stage 6: Port to LangGraph and add a workflow — built 2026-10-29
+
+Branch `feature_0928_02`. Not committed. Write-up: [stages/06-langgraph.md](stages/06-langgraph.md).
+
+### What was built
+
+| Path | Contents |
+|---|---|
+| `src/arl/framework/models.py` | `make_chat_model` (`init_chat_model` with `model_provider` and options from `models.yaml`); `bind` (Anthropic's `tool_choice` as an object); `usage_of`, `stop_of`, `tool_calls_of` (LangChain messages read back in our terms); `traced_call` |
+| `src/arl/framework/graph_agent.py` | Rung 3: `model → tools → limits → model`, `finish`. Guardrail state (taint, grounded ids, loop counts, budgets) in the graph state with reducers. `graph_off` and `graph_all` |
+| `src/arl/framework/workflow.py` | `route → gather (→ pick) → decide → act / escalate → reply`; 8 intents; at most 4 model calls; a tainted write is routed to `escalate` by an edge |
+| `src/arl/framework/prebuilt_agent.py` | `create_agent` with our tools, `ModelCallLimitMiddleware` and a taint middleware; not evaluated |
+| `src/arl/evals/runner.py`, `cli.py` | Strategies `graph_off`, `graph_all`, `workflow` (imported on first use); `PHASE = "phase-6"` |
+| `src/arl/tracing/tracer.py` | `langchain_callbacks()`: the Langfuse LangChain handler inside our run span, our per-call mirror off for those runs. Default unchanged |
+| `pyproject.toml` | `framework` extra: langgraph, langchain, langchain-openai, langchain-anthropic |
+| `tests/wire.py`, `tests/fake_chat.py` | The scripted model through a fake HTTP transport into the real `ChatOpenAI` / `ChatAnthropic`; a fake chat model with `bind_tools` |
+| `tests/` | 117 new tests (graph agent 77, model layer 12, workflow 18, `create_agent` 5, runner 5), one of them skipped; 578 pass and 2 are skipped, with no API calls |
+| `results/` | 7 sweep files; `report-phase6-v1.md`, `report-phase6-v1-workflow-vs-graph.md`, `report-phase6-adversarial.md`, `report-phase6-haiku.md` |
+
+Unchanged: `hand_loop.py`, `guarded_loop.py`, `single_round.py`, `guardrails/`, `env/`, `llm/`, the task sets, the graders, `tests/scripted.py`, the recorded fixtures.
+
+### Decisions made
+
+- **LangChain chat models** for the graph, the workflow and `create_agent`; our usage, cost and stop mapping applied to their messages (equal to the adapters' on the same bodies, tested).
+- **Parity is on decisions, not bytes:** tool calls as sent, results, stops, usage, cost, exits, guard events, idempotency keys, tools-off calls, output limits, end state.
+- **Our own sequential tools node**, not `ToolNode` (thread pool, thread-bound SQLite, call order matters for taint and grounding).
+- **Guardrail state lives in the graph state.** The Stage 5 modules are rebuilt from it in the node and their changes written back.
+- **Anthropic's `cache_control` goes in `model_kwargs`**, not per call.
+- **The graph agent ran all-on only, at 30 × 5** (the plan said 30 × 3). "Off" is proven by scripted parity.
+- **The optional workflow run on the adversarial set was skipped** (your call).
+
+### Measured in stage 6
+
+Spend: **$0.107** (smoke $0.003; `graph_all` v1 $0.028; `workflow` v1 $0.039; `graph_all` adversarial $0.027; Haiku $0.010).
+
+| v1 (30 × 5) | Success | pass^5 | Refuse | Calls/run | Cached | $/run | p50 / p95 |
+|---|---|---|---|---|---|---|---|
+| `guarded_all` (Stage 5 reference) | 95% | 90% | 73% | 2.92 | 95% | $0.000192 | 5.3 / 10.6 s |
+| `graph_all` | 98% | 93% | 90% | 2.90 | 96% | $0.000187 | 4.6 / 8.7 s |
+| `workflow` | 93% | 83% | 70% | 2.80 | 73% | $0.000263 | 4.5 / 7.1 s |
+
+- **Adversarial (12 × 5), `graph_all`:** harm 0/60, unsafe 0, double writes 0, runaways 0, utility 75%, the same as `guarded_all`. The guardrails fired identically: taint set 30 times, 13 writes blocked, 15 retries with keys.
+- **Haiku (10 × 1), `graph_all`:** 10/10, 2.90 calls/run, $0.000974 (Phase 3 `hand_loop`: 10/10, $0.000914).
+- **Findings:** the port changed nothing measurable (0 tasks worse; the same guardrail firings); the workflow costs 41% more per run (reply-step cache misses and more output), and is bounded at 2–4 calls.
+- **Directions (p = 0.25 each):** `graph_all` better than `guarded_all` on 3 refusal tasks; `workflow` worse than `graph_all` on 3 tasks (refuse-then-escalate in c15 and c21; the delivery date lost between steps in c23).
+
+### What stage 7 needs to know
+
+- **The graph state is serialisable**, except two values kept in closures: the run's start time (for the time budget), and the workflow's counter for its own call ids (`wf_N`). A resumed workflow would number its code-run calls again, so **an escalation made by code would get a new idempotency key on resume**. Move the counter into the state, or derive the id from the node and step, before checkpointing the workflow. The graph agent's keys come from the model's call ids, which are stored in `messages`, so they are stable.
+- **Nodes are closures compiled per run.** With a checkpointer, compile once and pass the store, tracer and chat model through LangGraph's runtime context (`context_schema`).
+- **A node re-runs from the top on resume.** The `tools` node runs every call of the batch: reads repeat harmlessly, writes are protected only when idempotency is on, and trace events are written twice. The approval gate belongs in its own node before `tools` (agent) or before `act` (workflow).
+- **The workflow's tainted-write edge is where an approval node fits.** Today it routes to `escalate`; routing to a person who can approve the write could recover a07 and a14 (0/5 utility in every guarded arm).
+- **`langgraph-checkpoint-sqlite` is installed** (pinned in `requirements/framework.txt`), but not in the `framework` extra yet.
+- **SQLite is thread-bound.** Anything that runs nodes or tools in parallel needs a connection opened with `check_same_thread=False` (see `prebuilt_agent.thread_shared_store`).
+- **The trace logs LangChain's view of each request**, not the wire body. The JSONL events and the graders are unchanged.
+
+### Open questions carried forward
+
+- Why does the workflow's reply step miss OpenAI's prompt cache when its route step does not? Try a per-step `prompt_cache_key`, or move the step instruction after the ticket.
+- Is the refusal gain of `graph_all` over `guarded_all` real (the system prompt placed in `input` instead of `instructions`), or noise?
+- Would a decide step with an explicit "refuse" choice remove the workflow's refuse-then-escalate failures? That needs a held-out split, so it is not tuned on v1.
+- The optional workflow run on the adversarial set (about $0.015) was not made.

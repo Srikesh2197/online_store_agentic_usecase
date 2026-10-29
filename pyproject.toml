@@ -19,6 +19,16 @@ dependencies = [
     "python-dotenv>=1.0,<2",
 ]
 
+[project.optional-dependencies]
+# Sub-project 2 (Stage 6): what the framework strategies import. Pinned in
+# requirements/framework.txt, which also lists the Stage 7 and 9 packages.
+framework = [
+    "langgraph>=1.2,<1.3",
+    "langchain>=1.4,<1.5",
+    "langchain-openai>=1.6,<2",
+    "langchain-anthropic>=1.7,<2",
+]
+
 [project.scripts]
 arl = "arl.cli:app"
 

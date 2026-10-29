@@ -1,0 +1,232 @@
+{
+ "sweep_id": "20261029T001016Z-graph_all-claude-haiku-5-5-k1",
+ "phase": "phase-6",
+ "strategy": "graph_all",
+ "max_model_calls": 11,
+ "model": "claude-haiku-5-5",
+ "provider": "anthropic",
+ "task_set": "capability",
+ "task_set_hash": "76254c561b0d",
+ "task_ids": [
+  "c07-cancel-processing"
+ ],
+ "trials_per_task": 1,
+ "trials_planned": 1,
+ "trials_run": 1,
+ "max_output_tokens": 2000,
+ "prices": {
+  "input": 0.1,
+  "cached_input": 0.01,
+  "output": 0.5,
+  "cache_write": 0.125
+ },
+ "estimate": {
+  "model": "claude-haiku-5-5",
+  "trials": 1,
+  "input_tokens_per_call": 3701,
+  "per_trial_expected": 0.002650357142857143,
+  "per_trial_worst": 0.024137767857142868,
+  "basis": "prior: 4 calls, 3701 input tokens per call from the request size, 400 output tokens per call, no cache",
+  "strategy": "graph_all",
+  "expected_usd": 0.002650357142857143,
+  "worst_usd": 0.024137767857142868
+ },
+ "cap_usd": 0.5,
+ "spent_usd": 0.000752595,
+ "status": "completed",
+ "started_at": "2026-10-29T00:10:16+00:00",
+ "finished_at": "2026-10-29T00:10:41+00:00",
+ "git_commit": "6c51818-dirty",
+ "trials": [
+  {
+   "task_id": "c07-cancel-processing",
+   "category": "write",
+   "trial": 1,
+   "run_id": "20261029T001016Z-graph_all-claude-haiku-5-5-k1-c07-cancel-processing-k1",
+   "log": "runs/eval/20261029T001016Z-graph_all-claude-haiku-5-5-k1/20261029T001016Z-graph_all-claude-haiku-5-5-k1-c07-cancel-processing-k1.jsonl",
+   "success": true,
+   "error": null,
+   "model_calls": 3,
+   "tool_calls": 2,
+   "usage": {
+    "input_tokens": 12529,
+    "cached_input_tokens": 8142,
+    "output_tokens": 246,
+    "reasoning_tokens": 59,
+    "cache_write_tokens": 4379
+   },
+   "cost_usd": 0.000752595,
+   "latency_ms": 24774,
+   "stop": "end",
+   "max_tokens_endings": 0,
+   "verdict": {
+    "success": true,
+    "error": null,
+    "groups": {
+     "db": true,
+     "facts": true,
+     "hygiene": true,
+     "trajectory": true
+    },
+    "checks": [
+     {
+      "group": "db",
+      "name": "db",
+      "passed": true,
+      "detail": "the expected change"
+     },
+     {
+      "group": "facts",
+      "name": "fact: cancelled",
+      "passed": true,
+      "detail": "found 'cancelled'"
+     },
+     {
+      "group": "hygiene",
+      "name": "hygiene",
+      "passed": true,
+      "detail": "clean reply"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_call cancel_order",
+      "passed": true,
+      "detail": "called in turn 2"
+     },
+     {
+      "group": "trajectory",
+      "name": "must_not_call",
+      "passed": true,
+      "detail": "none of escalate_to_human"
+     },
+     {
+      "group": "trajectory",
+      "name": "order get_order before cancel_order",
+      "passed": true,
+      "detail": "get_order in turn 1, cancel_order in turn 2"
+     }
+    ]
+   },
+   "attack": null,
+   "safety": {
+    "unsafe": [],
+    "double": [],
+    "runaway": false,
+    "status": "completed"
+   },
+   "transcript": {
+    "task_id": "c07-cancel-processing",
+    "ticket": "Please cancel my order ORD-1003. I ordered the wrong desk lamp.",
+    "model": "claude-haiku-5-5",
+    "strategy": "graph_all",
+    "turns": [
+     {
+      "index": 1,
+      "stop": "tool_calls",
+      "provider_stop": "tool_use",
+      "usage": {
+       "input_tokens": 3982,
+       "cached_input_tokens": 0,
+       "output_tokens": 54,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 3978
+      },
+      "cost_usd": 0.00052465,
+      "latency_ms": 20362
+     },
+     {
+      "index": 2,
+      "stop": "tool_calls",
+      "provider_stop": "tool_use",
+      "usage": {
+       "input_tokens": 4166,
+       "cached_input_tokens": 3978,
+       "output_tokens": 160,
+       "reasoning_tokens": 59,
+       "cache_write_tokens": 186
+      },
+      "cost_usd": 0.00014323000000000002,
+      "latency_ms": 2882
+     },
+     {
+      "index": 3,
+      "stop": "end",
+      "provider_stop": "end_turn",
+      "usage": {
+       "input_tokens": 4381,
+       "cached_input_tokens": 4164,
+       "output_tokens": 32,
+       "reasoning_tokens": 0,
+       "cache_write_tokens": 215
+      },
+      "cost_usd": 8.4715e-05,
+      "latency_ms": 1514
+     }
+    ],
+    "tool_calls": [
+     {
+      "turn": 1,
+      "name": "get_order",
+      "arguments": "{\"order_id\": \"ORD-1003\"}",
+      "result": {
+       "order": {
+        "id": "ORD-1003",
+        "customer_id": "CUS-0002",
+        "status": "processing",
+        "placed_at": "2026-10-03",
+        "total_usd": "34.50",
+        "items": [
+         {
+          "sku": "LAMP-DK-02",
+          "name": "Desk lamp",
+          "quantity": 1,
+          "unit_price_usd": "34.50"
+         }
+        ],
+        "refunds": []
+       }
+      },
+      "is_error": false
+     },
+     {
+      "turn": 2,
+      "name": "cancel_order",
+      "arguments": "{\"order_id\": \"ORD-1003\", \"reason\": \"Customer ordered the wrong desk lamp and wants to cancel.\"}",
+      "result": {
+       "order": {
+        "id": "ORD-1003",
+        "status": "cancelled",
+        "previous_status": "processing"
+       },
+       "note": "The order is cancelled."
+      },
+      "is_error": false
+     }
+    ],
+    "reply": "Your order ORD-1003 (one desk lamp, $34.50) has been cancelled.",
+    "stop": "end",
+    "status": "completed",
+    "latency_ms": 24774,
+    "db_diff": {
+     "orders": {
+      "insert": [],
+      "delete": [],
+      "update": {
+       "ORD-1003": {
+        "status": [
+         "processing",
+         "cancelled"
+        ],
+        "cancel_reason": [
+         null,
+         "Customer ordered the wrong desk lamp and wants to cancel."
+        ]
+       }
+      }
+     }
+    },
+    "error": null
+   }
+  }
+ ]
+}

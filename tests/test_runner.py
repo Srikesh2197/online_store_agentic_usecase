@@ -230,3 +230,70 @@ def test_dry_run_of_the_loop_shows_its_worst_case(monkeypatch):
     assert "hand_loop" in result.output and f"{runner.MAX_STEPS} calls" in result.output
     bad = CliRunner().invoke(cli.app, ["eval", "--dry-run", "--strategy", "nope"])
     assert bad.exit_code != 0
+
+
+# --- Stage 6: the framework strategies through the same harness ----------------------------
+
+def _framework_sweep(tmp_path, monkeypatch, strategy, *steps, task="c07"):
+    from scripted import ScriptedModel
+    from wire import wire_setup
+
+    for module in ("graph_agent", "workflow"):
+        monkeypatch.setattr(f"arl.framework.{module}.make_chat_model",
+                            lambda model: wire_setup(ScriptedModel("openai", *steps), "openai"))
+    return run_sweep(select(load_tasks(), task), adapter=OpenAIAdapter("gpt-6-luna", send=None),
+                     trials_per_task=2, cap_usd=1.0, est=_estimate(0.05, 2),
+                     results_dir=tmp_path / "results", runs_dir=tmp_path / "runs",
+                     sweep_id=f"{strategy}-sweep", strategy=strategy)
+
+
+@pytest.mark.parametrize("strategy", ["graph_off", "graph_all"])
+def test_sweep_runs_the_graph_agent(strategy, tmp_path, monkeypatch):
+    from scripted import calls, reply
+
+    doc = _framework_sweep(
+        tmp_path, monkeypatch, strategy,
+        calls(("get_order", {"order_id": "ORD-1003"})),
+        calls(("cancel_order", {"order_id": "ORD-1003", "reason": "Wrong lamp"})),
+        reply("Your order ORD-1003 is cancelled."))
+    assert doc["strategy"] == strategy and doc["phase"] == "phase-6"
+    assert all(t["success"] for t in doc["trials"]), [t["verdict"] for t in doc["trials"]]
+    assert {(t["model_calls"], t["tool_calls"]) for t in doc["trials"]} == {(3, 2)}
+    assert {t["transcript"]["strategy"] for t in doc["trials"]} == {strategy}
+    assert doc["spent_usd"] == pytest.approx(2 * 3 * (1000 * 0.10 + 100 * 0.50) / 1e6)
+
+
+def test_sweep_runs_the_workflow(tmp_path, monkeypatch):
+    from scripted import calls, reply
+
+    route = json.dumps({"intent": "cancel", "order_ids": ["ORD-1003"], "email": None,
+                        "summary": "Cancel ORD-1003."})
+    doc = _framework_sweep(
+        tmp_path, monkeypatch, "workflow", reply(route),
+        calls(("cancel_order", {"order_id": "ORD-1003", "reason": "Wrong lamp"})),
+        reply("Your order ORD-1003 is cancelled."))
+    assert doc["max_model_calls"] == 5
+    assert all(t["success"] for t in doc["trials"]), [t["verdict"] for t in doc["trials"]]
+    assert {t["transcript"]["strategy"] for t in doc["trials"]} == {"workflow"}
+
+
+def test_framework_strategies_borrow_a_measured_cost_and_are_bounded(tmp_path):
+    _sweep(tmp_path, trials=1, cap=1.0, worst=0.001)            # nothing to borrow for these
+    graph = estimate(TASKS, "gpt-6-luna", 1, tmp_path / "results", strategy="graph_all")
+    assert graph.basis.startswith("prior") and runner.STRATEGIES["graph_all"].max_calls == 11
+    workflow = estimate(TASKS, "gpt-6-luna", 1, tmp_path / "results", strategy="workflow")
+    assert workflow.per_trial_worst <= 0.01 + 0.01   # the dollar budget bounds it
+    assert runner.STRATEGIES["graph_off"].cost_basis == "hand_loop"
+    assert runner.STRATEGIES["graph_all"].invariants and runner.STRATEGIES["workflow"].invariants
+
+
+def test_the_cli_knows_the_framework_strategies(monkeypatch):
+    from arl import cli
+
+    monkeypatch.setattr("arl.llm.make_adapter", lambda model: (_ for _ in ()).throw(
+        AssertionError("a dry run must not build an adapter")))
+    for strategy in ("graph_all", "workflow"):
+        result = CliRunner().invoke(cli.app, ["eval", "--dry-run", "--tasks", "c01", "-k", "1",
+                                              "--strategy", strategy])
+        assert result.exit_code == 0, result.output
+        assert strategy in result.output

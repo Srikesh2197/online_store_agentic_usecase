@@ -43,8 +43,10 @@ def _echo(title: str, payload: object) -> None:
     typer.echo(json.dumps(_shorten_blobs(payload), indent=2))
 
 
-STRATEGY_HELP = ("single_round (rung 1), hand_loop (rung 2), or rung 2 with guardrails: "
-                 "guarded_prompt (prompt-only defence) or guarded_all (every guardrail).")
+STRATEGY_HELP = ("single_round (rung 1), hand_loop (rung 2), rung 2 with guardrails: "
+                 "guarded_prompt (prompt-only defence) or guarded_all (every guardrail); "
+                 "rung 3 on LangGraph: graph_off, graph_all, or workflow (needs the "
+                 "framework extra).")
 
 
 def _strategy(name: str):

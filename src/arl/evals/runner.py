@@ -6,9 +6,11 @@
     record     one results JSON per sweep and one ledger row, written even on a halt
 
 The agent under test is a strategy: rung 1 (`single_round`), rung 2 (`hand_loop`), each
-unchanged, or rung 2 with guardrails (`guarded_prompt`, `guarded_all`, Stage 5). The runner
-gives it a fresh store with the task's environment (its setup, faults and sender, and the
-arm's invariants) and a tracer, and afterwards records what the store looks like.
+unchanged, rung 2 with guardrails (`guarded_prompt`, `guarded_all`, Stage 5), or the Stage 6
+framework strategies on LangGraph: the graph agent (`graph_off`, `graph_all`) and the
+workflow (`workflow`). The runner gives it a fresh store with the task's environment (its
+setup, faults and sender, and the arm's invariants) and a tracer, and afterwards records what
+the store looks like. Every strategy is graded from the same trace events.
 """
 
 import csv
@@ -46,7 +48,7 @@ from arl.tracing.tracer import RUNS_DIR, Tracer, read_events
 RESULTS_DIR = ROOT / "results"
 LEDGER_NAME = "spend.csv"
 EVAL_RUNS_DIR = RUNS_DIR / "eval"
-PHASE = "phase-5"
+PHASE = "phase-6"
 PHASE_BUDGET_USD = 1.00
 
 
@@ -70,11 +72,40 @@ def _guarded(profile: str, **fields) -> Strategy:
                     max_usd=guards.limits.max_usd if guards.limits else None, **fields)
 
 
+def _graph(profile: str, name: str, cost_basis: str) -> Strategy:
+    """Rung 3: the graph agent with a Stage 5 profile. Imported on first use, so the
+    foundations run without the framework extra installed."""
+    guards = PROFILES[profile]
+
+    def run(ticket, **kwargs):
+        from arl.framework.graph_agent import run_graph_agent
+        return run_graph_agent(ticket, guards=guards, strategy=name, **kwargs)
+
+    return Strategy(name, run, max_calls=MAX_STEPS + (1 if guards.truncation_retry else 0),
+                    prior_calls=4, invariants=guards.invariants, cost_basis=cost_basis,
+                    max_usd=guards.limits.max_usd if guards.limits else None)
+
+
+def _workflow() -> Strategy:
+    guards = PROFILES["guarded_all"]
+
+    def run(ticket, **kwargs):
+        from arl.framework.workflow import run_workflow
+        return run_workflow(ticket, guards=guards, **kwargs)
+
+    # route, pick, decide, reply and one truncation retry
+    return Strategy("workflow", run, max_calls=5, prior_calls=3, invariants=guards.invariants,
+                    cost_basis="hand_loop", max_usd=guards.limits.max_usd)
+
+
 STRATEGIES = {
     "single_round": Strategy("single_round", run_single_round, max_calls=2, prior_calls=2),
     "hand_loop": Strategy("hand_loop", run_hand_loop, max_calls=MAX_STEPS, prior_calls=4),
     "guarded_prompt": _guarded("guarded_prompt"),
     "guarded_all": _guarded("guarded_all"),
+    "graph_off": _graph("guarded_off", "graph_off", cost_basis="hand_loop"),
+    "graph_all": _graph("guarded_all", "graph_all", cost_basis="guarded_all"),
+    "workflow": _workflow(),
 }
 DEFAULT_STRATEGY = "single_round"
 # Request characters per input token, measured from the recorded t1 bodies in
