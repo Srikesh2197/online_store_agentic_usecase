@@ -161,6 +161,12 @@ class AgentContext:
     delegates: tuple[ToolSpec, ...] = ()  # tools that run code here: subagents, handoffs
     # Runs one batch's delegated calls: (calls, state, ctx) -> {call id: Delegated}
     run_delegates: Callable | None = None
+    # Stage 9. The defaults are the agent of Stages 6-8 exactly.
+    store_specs: tuple[ToolSpec, ...] | None = None   # store tool definitions offered (MCP:
+                                                      # the server's); None: tool_specs()
+    run_tool: Callable | None = None      # runs a store tool, execute_tool's signature; None:
+                                          # execute_tool itself (MCP: a call to the server)
+    evaluator: ChatSetup | None = None    # the evaluator's model, in the evaluated graph only
 
 
 # --- The graph -----------------------------------------------------------------------------
@@ -171,7 +177,7 @@ def system_prompt(guards: Guards) -> str:
 
 def offered_specs(ctx: AgentContext) -> list[ToolSpec]:
     """The tools this agent's model is given: its store tools, then its delegated tools."""
-    store = tool_specs()
+    store = list(ctx.store_specs) if ctx.store_specs is not None else tool_specs()
     if ctx.tools is not None:
         store = [spec for spec in store if spec.name in ctx.tools]
     return store + list(ctx.delegates)
@@ -291,8 +297,10 @@ def tools_node(state: AgentState, runtime: Runtime[AgentContext]) -> dict:
         key = (f"{tracer.run_id}:{call.id}"
                if guards.idempotency and tool is not None and tool.kind != "read" else None)
 
+        run_tool = ctx.run_tool or execute_tool
+
         def attempt() -> dict:
-            return execute_tool(ctx.conn, call.name, call.arguments, idempotency_key=key)
+            return run_tool(ctx.conn, call.name, call.arguments, idempotency_key=key)
 
         if not guards.retries:
             return attempt()
@@ -450,32 +458,48 @@ def make_gate(policy: Policy):
 
 
 @lru_cache(maxsize=64)
-def compiled_graph(policy: Policy | None = None, checkpointer=None):
-    """The agent graph, compiled once per (policy, checkpointer) and reused by every run.
+def compiled_graph(policy: Policy | None = None, checkpointer=None, evaluator: bool = False):
+    """The agent graph, compiled once per (policy, checkpointer, evaluator) and reused by
+    every run.
 
-    Without a policy it is the Stage 6 graph exactly; with one, a gate sits before tools."""
-    graph = StateGraph(AgentState, context_schema=AgentContext)
-    graph.add_node("model", model)
+    Without a policy it is the Stage 6 graph exactly; with one, a gate sits before tools.
+    With `evaluator` (Stage 9), a `verify` node checks writes and the reply first
+    (framework/patterns/evaluator.py)."""
+    if evaluator:
+        from arl.framework.patterns.evaluator import (
+            EvaluatedState,
+            evaluated_model,
+            wire_evaluator,
+        )
+        graph = StateGraph(EvaluatedState, context_schema=AgentContext)
+        graph.add_node("model", evaluated_model)
+    else:
+        graph = StateGraph(AgentState, context_schema=AgentContext)
+        graph.add_node("model", model)
     graph.add_node("tools", tools_node)
     graph.add_node("limits", limits)
     graph.add_node("finish", finish)
     graph.add_edge(START, "model")
-    if policy is None:
+    if policy is not None:
+        graph.add_node("gate", make_gate(policy))
+        graph.add_edge("gate", "tools")
+    if evaluator:
+        wire_evaluator(graph, gated=policy is not None)
+    elif policy is None:
         graph.add_conditional_edges("model", after_model, ["tools", "finish"])
     else:
-        graph.add_node("gate", make_gate(policy))
         graph.add_conditional_edges("model", after_model_gated, ["gate", "finish"])
-        graph.add_edge("gate", "tools")
     graph.add_edge("tools", "limits")
     graph.add_edge("limits", "model")
     graph.add_edge("finish", END)
     return graph.compile(checkpointer=checkpointer)
 
 
-def recursion_limit(max_steps: int, gated: bool = False) -> int:
-    """A backstop above any run our own cap allows (model, gate, tools, limits per step, plus
-    finish). LangGraph's default is 1000; it raises GraphRecursionError, it does not reply."""
-    return (5 if gated else 4) * max_steps + 5
+def recursion_limit(max_steps: int, gated: bool = False, evaluated: bool = False) -> int:
+    """A backstop above any run our own cap allows (model, verify, gate, tools, limits per
+    step, plus finish). LangGraph's default is 1000; it raises GraphRecursionError, it does
+    not reply."""
+    return (4 + gated + evaluated) * max_steps + 5
 
 
 # --- Driving a run: start, pause for a reviewer, resume, stop --------------------------------
@@ -554,8 +578,9 @@ def log_decisions(tracer: Tracer, packet: dict, decisions: dict) -> None:
                      reviewer=d.get("reviewer"), reason=d.get("reason"))
 
 
-def run_config(tracer: Tracer, max_steps: int, *, gated: bool, thread_id: str | None) -> dict:
-    config = {"recursion_limit": recursion_limit(max_steps, gated),
+def run_config(tracer: Tracer, max_steps: int, *, gated: bool, thread_id: str | None,
+               evaluated: bool = False) -> dict:
+    config = {"recursion_limit": recursion_limit(max_steps, gated, evaluated),
               "callbacks": tracer.langchain_callbacks()}
     if thread_id is not None:
         config["configurable"] = {"thread_id": thread_id}
@@ -581,6 +606,7 @@ def run_graph_agent(
     checkpointer=None,
     control=None,
     agent_fields: dict | None = None,
+    evaluator: ChatSetup | None = None,
 ) -> RunResult:
     """Run one ticket. `adapter` names the model (as for every strategy); the call itself goes
     through a LangChain chat model, `chat` if given (tests), else one built from config.
@@ -590,7 +616,11 @@ def run_graph_agent(
     (`run id : call id`) are the same in every process that continues the run.
 
     `agent_fields` (Stage 8) sets the multi-agent fields of the context: the agent's name,
-    tools, prompt and delegates. The supervisor is this same run with them set."""
+    tools, prompt and delegates. The supervisor is this same run with them set. Stage 9 adds
+    `store_specs` and `run_tool` (tools served over MCP) to what it may set.
+
+    `evaluator` (Stage 9) is the evaluator's chat model: the run uses the evaluated graph,
+    where a separate model checks writes and the reply before they take effect."""
     if max_steps < 2:
         raise ValueError("max_steps must be at least 2: one call to act, one to reply.")
     setup = chat or make_chat_model(adapter.model)
@@ -601,12 +631,13 @@ def run_graph_agent(
     started = clock()
     ctx = AgentContext(setup=setup, conn=conn, tracer=tracer, guards=guards,
                        max_steps=max_steps, echo=echo, clock=clock, sleep=sleep, started=started,
-                       **(agent_fields or {}))
-    graph = compiled_graph(policy, checkpointer)
+                       evaluator=evaluator, **(agent_fields or {}))
+    graph = compiled_graph(policy, checkpointer, evaluator is not None)
     with tracer.as_agent(ctx.agent), tracer.run(
             ticket_id=ticket_id, ticket=ticket, model=setup.model, provider=setup.provider,
             strategy=strategy):
         config = run_config(tracer, max_steps, gated=policy is not None,
-                            thread_id=tracer.run_id if checkpointer is not None else None)
+                            thread_id=tracer.run_id if checkpointer is not None else None,
+                            evaluated=evaluator is not None)
         return drive(graph, initial_state(ticket), config, ctx, reviewer=reviewer,
                      control=control)

@@ -1,0 +1,54 @@
+id: s05-return-of-the-sealed-mats
+title: A return of items the customer said earlier were sealed
+provenance: "sequence (Stage 9): the condition is in the customer's words in ticket 1"
+sender: chloe.garza17@example.com
+first:
+  category: read
+  ticket: |
+    From: chloe.garza17@example.com (signed in)
+
+    Is ORD-2034 still inside the return window? The two yoga mats are still sealed in their
+    wrap. I haven't decided yet whether to send them back.
+  expected:
+    disposition: resolved
+    reply:
+      facts:
+        - ["2026-10-03", "october 3", "oct 3", "oct. 3", "3 october", "10/3", "10/03"]
+  trajectory:
+    must_call: [get_shipment]
+    must_not_call: ["@write", "@escalate"]
+  reference:
+    turns:
+      - [[get_order, {order_id: ORD-2034}], [get_shipment, {order_id: ORD-2034}]]
+    reply: >
+      Yes. The mats were delivered on 2026-10-03, and unopened items can be returned within 30
+      days of delivery, so you have until 2026-11-02.
+second:
+  category: write
+  ticket: |
+    From: chloe.garza17@example.com (signed in)
+
+    I've decided to send the mats back after all. Please set up the return.
+  expected:
+    disposition: resolved
+    db_change:
+      returns:
+        insert:
+          - {order_id: ORD-2034, sku: MAT-YG-06, quantity: 2, condition: unopened}
+  trajectory:
+    must_call: [create_return]
+    must_not_call: [issue_refund, escalate_to_human]
+    order:
+      - {first: [get_order, get_shipment], then: create_return}
+  reference:
+    turns:
+      - [[get_order, {order_id: ORD-2034}], [get_shipment, {order_id: ORD-2034}]]
+      - [[create_return, {order_id: ORD-2034, sku: MAT-YG-06, quantity: 2,
+                          condition: unopened, reason: "Unopened; customer changed their mind"}]]
+    reply: >
+      I've authorised the return of the two unopened yoga mats from ORD-2034. You'll get a
+      prepaid label by email, and the refund is issued when the warehouse receives them.
+needs: ["ORD-2034", "still sealed"]
+notes: >-
+  The condition decides whether a return is allowed (opened and not defective: no), and only
+  ticket 1 says the mats are sealed. Without the history the agent must ask.

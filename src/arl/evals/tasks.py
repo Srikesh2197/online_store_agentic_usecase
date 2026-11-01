@@ -41,6 +41,13 @@ FROZEN_ADVERSARIAL_HASH: str | None = "44c9b476eaa8"
 PARALLEL_SET = "parallel"
 FROZEN_PARALLEL_HASH: str | None = "2cc7a9b329ed"
 
+# The sequence set (Stage 9): two-ticket sequences from one signed-in customer, where the
+# second ticket needs something only the first one had (an order, a reference, the customer's
+# own words). For the long-term memory taster. Frozen 2026-11-01 after one calibration round
+# (graph_memory and graph_all, 6 x 1 each), with no rewrite.
+SEQUENCE_SET = "sequence"
+FROZEN_SEQUENCE_HASH: str | None = "3022abd9072e"
+
 TOOL_NAMES = {tool.name for tool in TOOLS}
 KINDS = {tool.kind for tool in TOOLS}
 
@@ -154,6 +161,64 @@ class Task(_Strict):
     attack: Attack | None = None
 
 
+class Part(_Strict):
+    """One ticket of a sequence: a Task without the fields the sequence holds."""
+    category: Category
+    ticket: str
+    expected: Expected
+    trajectory: Trajectory = Trajectory()
+    reference: Reference
+    notes: str = ""
+
+
+class SequenceTask(_Strict):
+    """Two tickets from the same signed-in customer, run one after the other on one store.
+
+    Each part is graded as an ordinary task, on its own changes to the store. The headline is
+    the second ticket. `needs` lists text the customer history must hold after the first
+    ticket's reference run for the second to be answerable (a test checks it)."""
+    id: str
+    title: str
+    provenance: str
+    sender: str
+    first: Part
+    second: Part
+    needs: list[str]
+    notes: str = ""
+
+    def part(self, n: int) -> Task:
+        part = self.first if n == 1 else self.second
+        return Task(id=f"{self.id}.{n}", title=f"{self.title} (ticket {n})",
+                    category=part.category, provenance=self.provenance, ticket=part.ticket,
+                    expected=part.expected, trajectory=part.trajectory,
+                    reference=part.reference, notes=part.notes, sender=self.sender)
+
+    @property
+    def parts(self) -> tuple[Task, Task]:
+        return self.part(1), self.part(2)
+
+    # What the runner and the report read from any task: the second ticket's.
+    @property
+    def category(self) -> str:
+        return self.second.category
+
+    @property
+    def ticket(self) -> str:
+        return self.second.ticket
+
+    @property
+    def setup(self) -> dict:
+        return {}
+
+    @property
+    def faults(self) -> list:
+        return []
+
+    @property
+    def attack(self):
+        return None
+
+
 def expand_tools(names: list[str]) -> set[str]:
     """Tool names, with "@kind" standing for every tool of that kind."""
     out = set()
@@ -230,8 +295,9 @@ def task_files(task_set: str = DEFAULT_SET) -> list[Path]:
     return sorted((TASKS_DIR / task_set).glob("*.yaml"))
 
 
-def load_task(path: Path) -> Task:
-    task = Task.model_validate(yaml.safe_load(path.read_text()))
+def load_task(path: Path) -> Task | SequenceTask:
+    model = SequenceTask if path.parent.name == SEQUENCE_SET else Task
+    task = model.model_validate(yaml.safe_load(path.read_text()))
     if task.id != path.stem:
         raise ValueError(f"{path.name}: id '{task.id}' does not match the file name")
     return task
@@ -270,4 +336,22 @@ def select(tasks: tuple[Task, ...], spec: str = "all") -> list[Task]:
 
 def by_id(tasks: tuple[Task, ...]) -> dict[str, Task]:
     return {task.id: task for task in tasks}
+
+
+def grading_tasks(task_set: str = DEFAULT_SET) -> dict[str, Task]:
+    """{id: the task a record with that id is graded against}. A sequence's record is graded
+    on its second ticket, the headline; its first is under the record's `first`."""
+    return {t.id: (t.part(2) if isinstance(t, SequenceTask) else t)
+            for t in load_tasks(task_set)}
+
+
+def sequence_problems(seq: SequenceTask) -> list[str]:
+    """consistency_problems for each part, plus what a sequence needs: a signed-in sender
+    named on both tickets."""
+    problems = []
+    for task in seq.parts:
+        problems += [f"{task.id}: {p}" for p in consistency_problems(task)]
+        if not task.ticket.startswith(f"From: {seq.sender} (signed in)"):
+            problems.append(f"{task.id}: the ticket does not start with the sender line")
+    return problems
 

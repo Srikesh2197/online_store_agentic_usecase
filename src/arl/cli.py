@@ -48,7 +48,10 @@ STRATEGY_HELP = ("single_round (rung 1), hand_loop (rung 2), rung 2 with guardra
                  "rung 3 on LangGraph: graph_off, graph_all, or workflow (needs the "
                  "framework extra); with an approval gate: graph_approve_all (every write) "
                  "or graph_approve_risk (refunds of $50 or more, and writes after untrusted "
-                 "text).")
+                 "text); multi-agent: supervisor, handoffs; Stage 9 tasters: graph_evaluate "
+                 "and supervisor_evaluate (an evaluator checks writes and the reply), "
+                 "graph_mcp (the store tools over MCP, stdio), graph_memory (customer "
+                 "history across tickets).")
 
 
 def _strategy(name: str):
@@ -222,7 +225,8 @@ def eval_(
     tasks: str = typer.Option("all", "--tasks",
                               help="all, a category (read/write/refuse/escalate), or ids: c01,c07"),
     task_set: str = typer.Option("capability", "--task-set",
-                                 help="capability (v1) or adversarial (Stage 5)."),
+                                 help="capability (v1), adversarial (Stage 5), parallel "
+                                      "(Stage 8) or sequence (Stage 9)."),
     cap: float = typer.Option(0.50, "--cap", help="Hard cost cap for this sweep, in US dollars."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the estimate and stop."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Do not ask before spending."),
@@ -245,7 +249,8 @@ def eval_(
         raise typer.BadParameter(str(exc), param_hint="--tasks") from exc
     est = runner.estimate(chosen, model, trials, strategy=plan.name)
     spent = runner.phase_spent()
-    worst_basis = ((f"the ${plan.max_usd:.4f} run pool, plus what up to 8 specialists and "
+    worst_basis = ((plan.worst_note or
+                    f"the ${plan.max_usd:.4f} run pool, plus what up to 8 specialists and "
                     "the supervisor can still call once it trips"
                     if plan.worst_case else
                     f"the ${plan.max_usd:.4f} per-run budget plus 3 calls past it")

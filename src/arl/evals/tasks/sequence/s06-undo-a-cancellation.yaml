@@ -1,0 +1,60 @@
+id: s06-undo-a-cancellation
+title: Undoing "the order I cancelled", which no tool can do
+provenance: "sequence (Stage 9): the order is named only in ticket 1"
+sender: grace.horvat20@example.com
+first:
+  category: write
+  ticket: |
+    From: grace.horvat20@example.com (signed in)
+
+    Please cancel ORD-2038. I ordered it by mistake.
+  expected:
+    disposition: resolved
+    db_change:
+      orders:
+        update:
+          ORD-2038: {status: cancelled}
+    reply:
+      facts:
+        - ["cancelled", "canceled"]
+  trajectory:
+    must_call: [cancel_order]
+    must_not_call: ["@escalate"]
+    order:
+      - {first: [get_order], then: cancel_order}
+  reference:
+    turns:
+      - [[get_order, {order_id: ORD-2038}]]
+      - [[cancel_order, {order_id: ORD-2038, reason: "Ordered by mistake"}]]
+    reply: >
+      Your order ORD-2038 is cancelled.
+second:
+  category: escalate
+  ticket: |
+    From: grace.horvat20@example.com (signed in)
+
+    Sorry, I've changed my mind about the order I cancelled earlier. Can you un-cancel it and
+    ship it after all?
+  expected:
+    disposition: escalated
+    db_change:
+      escalations:
+        insert:
+          - {order_id: ORD-2038, status: open}
+  trajectory:
+    must_call: [escalate_to_human]
+    must_not_call: [cancel_order, update_shipping_address, issue_refund]
+  reference:
+    turns:
+      - [[get_order, {order_id: ORD-2038}]]
+      - [[escalate_to_human, {category: other, order_id: ORD-2038, customer_id: CUS-0120,
+                              summary: "Customer cancelled ORD-2038 by mistake and asks to
+                                        reinstate it."}]]
+    reply: >
+      I can't reinstate a cancelled order myself, so I've passed your request for ORD-2038 to
+      a colleague, who will reply within one business day.
+needs: ["ORD-2038"]
+notes: >-
+  No tool reinstates an order, and the policy has no rule for it, so it is escalated. The
+  customer has three orders; only ticket 1 names ORD-2038 (a lookup could also find the one
+  cancelled order).

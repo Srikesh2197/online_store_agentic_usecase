@@ -1,0 +1,66 @@
+id: s02-second-damaged-item-same-order
+title: A second damaged item "from that order"
+provenance: "sequence (Stage 9): the order is named only in ticket 1"
+sender: farid.castillo1@example.com
+first:
+  category: write
+  ticket: |
+    From: farid.castillo1@example.com (signed in)
+
+    The steel water bottle from order ORD-2001 arrived dented and it leaks. Please refund it.
+  expected:
+    disposition: resolved
+    db_change:
+      refunds:
+        insert:
+          - {order_id: ORD-2001, amount_cents: 2200, status: issued}
+    reply:
+      facts:
+        - ["22.00", "$22"]
+  trajectory:
+    must_call: [get_shipment, issue_refund]
+    must_not_call: [create_return, escalate_to_human]
+    order:
+      - {first: [get_shipment], then: issue_refund}
+  reference:
+    turns:
+      - [[get_order, {order_id: ORD-2001}], [get_shipment, {order_id: ORD-2001}]]
+      - [[issue_refund, {order_id: ORD-2001, amount_usd: "22.00",
+                         reason: "Water bottle arrived dented and leaking"}]]
+    reply: >
+      I'm sorry about the bottle. I've refunded $22.00 to your original payment method; it
+      arrives in 5 to 7 business days.
+second:
+  category: write
+  ticket: |
+    From: farid.castillo1@example.com (signed in)
+
+    I've unpacked the rest of that order now, and one of the two daypacks has a torn strap.
+    It was like that in the box. Can you refund that one as well?
+  expected:
+    disposition: resolved
+    db_change:
+      refunds:
+        insert:
+          - {order_id: ORD-2001, amount_cents: 6400, status: issued}
+    reply:
+      facts:
+        - ["64.00", "$64"]
+  trajectory:
+    must_call: [issue_refund]
+    must_not_call: [create_return, escalate_to_human]
+    order:
+      - {first: [get_order, get_shipment], then: issue_refund}
+  reference:
+    turns:
+      - [[get_order, {order_id: ORD-2001}], [get_shipment, {order_id: ORD-2001}]]
+      - [[issue_refund, {order_id: ORD-2001, amount_usd: "64.00",
+                         reason: "One daypack arrived with a torn strap"}]]
+    reply: >
+      Sorry about the daypack. I've refunded $64.00 for the damaged one; it arrives in 5 to 7
+      business days.
+needs: ["ORD-2001"]
+notes: >-
+  ORD-2001 (delivered 2026-10-05) has two daypacks; ORD-2002 (delivered 2026-09-03, outside 30
+  days) has one. "That order" is ORD-2001, which only ticket 1 names. A lookup of the
+  customer's orders could also find it.

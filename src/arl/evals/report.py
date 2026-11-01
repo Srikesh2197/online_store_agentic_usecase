@@ -17,7 +17,13 @@ from pathlib import Path
 from arl.evals.graders import GROUPS, Verdict, grade
 from arl.evals.graders.attack import grade_attack
 from arl.evals.safety import safety
-from arl.evals.tasks import ADVERSARIAL_CATEGORIES, by_id, load_tasks, task_set_hash
+from arl.evals.tasks import (
+    ADVERSARIAL_CATEGORIES,
+    by_id,
+    grading_tasks,
+    load_tasks,
+    task_set_hash,
+)
 from arl.evals.transcript import Transcript
 
 CATEGORIES = ("read", "write", "refuse", "escalate")
@@ -34,10 +40,18 @@ def load_results(path: Path, regrade: bool = False) -> dict:
     if sidecar.exists():   # the advisory judge column, from `arl judge`
         doc["judge"] = json.loads(sidecar.read_text())
     if regrade:
-        tasks = by_id(load_tasks(doc["task_set"]))
+        tasks = grading_tasks(doc["task_set"])
+        sequences = by_id(load_tasks(doc["task_set"]))
         for trial in doc["trials"]:
             verdict = grade(tasks[trial["task_id"]], Transcript.from_dict(trial["transcript"]))
             trial["verdict"], trial["success"] = verdict.to_dict(), verdict.success
+            if trial.get("first"):   # a sequence: its first ticket, graded on its own
+                first = trial["first"]
+                v1 = grade(sequences[trial["task_id"]].part(1),
+                           Transcript.from_dict(first["transcript"]))
+                first["verdict"], first["success"] = v1.to_dict(), v1.success
+                trial["first_success"] = v1.success
+                trial["both_success"] = bool(v1.success and verdict.success)
         doc["regraded_with"] = task_set_hash(doc["task_set"])
     return doc
 
@@ -334,7 +348,7 @@ def disagreements(doc: dict, limit: int = 20) -> str:
 def graded_trials(doc: dict) -> list[dict]:
     """Every graded trial with its attack verdict and safety counts, recomputed from the
     stored transcript against the task files, so --regrade covers them too."""
-    tasks = by_id(load_tasks(doc["task_set"]))
+    tasks = grading_tasks(doc["task_set"])
     out = []
     for t in doc["trials"]:
         if t["success"] is None or t["task_id"] not in tasks:
@@ -541,7 +555,7 @@ def reviewer_replay_table(docs: list[dict]) -> str:
 
     rows = []
     for doc in [d for d in docs if has_approvals(d)]:
-        tasks = by_id(load_tasks(doc["task_set"]))
+        tasks = grading_tasks(doc["task_set"])
         reviewed = [(tasks.get(t["task_id"]), review["packet"], call)
                     for t in doc["trials"] for review in _approvals(t)["reviews"]
                     for call in review["packet"]["calls"]]
@@ -690,6 +704,159 @@ def coordination_table(docs: list[dict]) -> str:
               "(same tool and arguments), by any agent.")
 
 
+# --- Stage 9: the tasters ----------------------------------------------------------------
+
+def _ok(doc: dict) -> list[dict]:
+    return [t for t in doc["trials"] if not t["error"]]
+
+
+def has_evaluator(doc: dict) -> bool:
+    return any(t.get("evaluator") for t in doc["trials"])
+
+
+def evaluator_table(docs: list[dict]) -> str:
+    """What the evaluator did: checks per run, what it sent back, how those runs ended, its
+    share of the cost."""
+    rows = []
+    for doc in [d for d in docs if has_evaluator(d)]:
+        runs = _ok(doc)
+        ev = [t.get("evaluator") or {"checks": 0, "errors": 0, "by_point": {}, "revisions": []}
+              for t in runs]
+        revised = [t for t, e in zip(runs, ev) if e["revisions"]]
+        points = Counter(r["point"] for e in ev for r in e["revisions"])
+        cost = sum(t["cost_usd"] for t in runs) or 1
+        mine = sum(((t.get("agents") or {}).get("agents", {}).get("evaluator") or {})
+                   .get("cost_usd", 0) for t in runs)
+        rows.append([arm_name(doc), f"{statistics.mean(e['checks'] for e in ev):.2f}",
+                     f"{statistics.mean(e['by_point'].get('action', 0) for e in ev):.2f}",
+                     f"{statistics.mean(e['by_point'].get('reply', 0) for e in ev):.2f}",
+                     f"{len(revised)} ({_pct(len(revised) / len(runs))})",
+                     f"{points.get('action', 0)} / {points.get('reply', 0)}",
+                     f"{sum(bool(t['success']) for t in revised)}/{len(revised)}",
+                     sum(e["errors"] for e in ev), f"${mine / len(runs):.6f}", _pct(mine / cost)])
+    return (_table(["arm", "checks/run", "action checks/run", "reply checks/run",
+                    "runs sent back", "sent back: actions / replies",
+                    "sent-back runs that passed", "unreadable verdicts", "evaluator $/run", "evaluator share of $"],
+                   rows)
+            + "\nAt most one revision per run. A sent-back batch never ran; its calls are "
+              "drafts, logged as evaluator_verdict events, not tool calls.")
+
+
+def gain_table(docs: list[dict]) -> str:
+    """Each evaluated arm against the first arm on the tasks both ran, matched on k: the
+    success gained and what it cost per run, and the cost per point of success gained."""
+    ref = docs[0]
+    rows = []
+    for doc in [d for d in docs[1:] if has_evaluator(d)]:
+        k = min(ref["trials_per_task"], doc["trials_per_task"])
+        a, b = first_trials(doc, k), first_trials(ref, k)
+        common = set(per_task(a)) & set(per_task(b))
+        sa, sb = ([bool(t["success"]) for t in d["trials"] if t["task_id"] in common
+                   and t["success"] is not None] for d in (a, b))
+        ca, cb = ([t["cost_usd"] for t in d["trials"] if t["task_id"] in common
+                   and not t["error"]] for d in (a, b))
+        gain = 100 * (statistics.mean(sa) - statistics.mean(sb))
+        extra = statistics.mean(ca) - statistics.mean(cb)
+        per_point = f"${extra / gain:.6f}" if gain > 0 else "no gain"
+        rows.append([arm_name(doc), len(common), k, _pct(statistics.mean(sb)),
+                     _pct(statistics.mean(sa)), f"{gain:+.1f}", f"${statistics.mean(cb):.6f}",
+                     f"${statistics.mean(ca):.6f}", f"{statistics.mean(ca) / statistics.mean(cb):.2f}×",
+                     per_point])
+    return (_table(["arm", "tasks", "k", "reference success", "arm success", "points gained",
+                    "reference $/run", "arm $/run", "cost ×", "extra $/run per point gained"],
+                   rows)
+            + f"\nReference = {arm_name(ref)}. Whether the gain is a finding is in the paired "
+              "table below.")
+
+
+def strict_table(docs: list[dict]) -> str:
+    """Success if a sent-back proposal counted as an attempt: a proposed call to a tool the
+    task forbids would then fail its must_not_call check."""
+    from arl.evals.tasks import expand_tools
+
+    rows = []
+    for doc in [d for d in docs if has_evaluator(d)]:
+        tasks = grading_tasks(doc["task_set"])
+        graded = [t for t in doc["trials"] if t["success"] is not None]
+        flipped = 0
+        for t in graded:
+            task = tasks.get(t["task_id"])
+            if not (t["success"] and task and t.get("evaluator")):
+                continue
+            forbidden = expand_tools(task.trajectory.must_not_call)
+            if any(c["tool"] in forbidden for r in t["evaluator"]["revisions"]
+                   if r["point"] == "action" for c in r["proposed"]):
+                flipped += 1
+        ok = sum(bool(t["success"]) for t in graded)
+        rows.append([arm_name(doc), _pct(ok / len(graded)), flipped,
+                     _pct((ok - flipped) / len(graded))])
+    return _table(["arm", "success", "passes that sent back a forbidden call",
+                   "success, strict reading"], rows)
+
+
+def has_sequences(doc: dict) -> bool:
+    return any("first" in t for t in doc["trials"])
+
+
+def sequence_table(docs: list[dict]) -> str:
+    rows = []
+    for doc in [d for d in docs if has_sequences(d)]:
+        graded = [t for t in doc["trials"] if t["success"] is not None and "first" in t]
+        wrong = sum(1 for t in graded if t["transcript"].get("db_diff")
+                    and not t["verdict"]["groups"]["db"])
+        memory = [t["memory"] for t in graded if t.get("memory")]
+        rows.append([arm_name(doc), len(graded),
+                     _pct(statistics.mean(bool(t["first_success"]) for t in graded)),
+                     _pct(statistics.mean(bool(t["success"]) for t in graded)),
+                     _pct(statistics.mean(bool(t["both_success"]) for t in graded)), wrong,
+                     f"{statistics.mean(m['chars'] for m in memory):,.0f}" if memory else "–"])
+    return (_table(["arm", "sequences", "ticket 1", "ticket 2 (headline)", "both",
+                    "wrong changes on ticket 2", "history chars read (ticket 2)"], rows)
+            + "\nEach ticket is graded on its own changes to the store. A wrong change: ticket "
+              "2 changed the store and its database check failed.")
+
+
+def has_mcp(doc: dict) -> bool:
+    return any(t.get("mcp") for t in doc["trials"])
+
+
+def _per_call_ms(trials: list[dict]) -> float | None:
+    timed = [t for t in trials if t.get("tool_ms") is not None]   # files before Stage 9: none
+    calls = sum(t["tool_calls"] for t in timed)
+    return sum(t["tool_ms"] for t in timed) / calls if calls else None
+
+
+def mcp_table(docs: list[dict]) -> str:
+    ref = docs[0]
+    rows = []
+    for doc in docs:
+        runs = _ok(doc)
+        hops = [t["mcp"] for t in runs if t.get("mcp")]
+        per_call = _per_call_ms(runs)
+        p50 = summary(doc)["p50"]
+        rows.append([arm_name(doc), hops[0]["transport"] if hops else "in-process",
+                     f"{_percentile([h['connect_ms'] for h in hops], 0.5):.0f}" if hops else "–",
+                     f"{_percentile([h['list_ms'] for h in hops], 0.5):.0f}" if hops else "–",
+                     f"{per_call:.2f}" if per_call is not None else "–",
+                     f"{p50:.2f}" if p50 else "–"])
+    return (_table(["arm", "tools", "connect ms (p50)", "list ms (p50)", "ms per tool call",
+                    "p50 run latency (s)"], rows)
+            + f"\nReference = {arm_name(ref)}. Connect is starting the server and the "
+              "handshake; a run's latency includes it.")
+
+
+def cache_table(docs: list[dict]) -> str:
+    """The share of input the provider served from its prompt cache, from the usage logged."""
+    rows = []
+    for doc in docs:
+        runs = _ok(doc)
+        inputs = sum(t["usage"].get("input_tokens", 0) for t in runs)
+        cached = sum(t["usage"].get("cached_input_tokens", 0) for t in runs)
+        rows.append([arm_name(doc), f"{inputs / max(len(runs), 1):,.0f}",
+                     _pct(cached / inputs) if inputs else "–"])
+    return _table(["arm", "input tokens/run", "cached"], rows)
+
+
 def full_report(docs: list[dict]) -> str:
     parts = []
     regraded = [d for d in docs if d.get("regraded_with")]
@@ -733,6 +900,17 @@ def full_report(docs: list[dict]) -> str:
         parts += ["## Multi-agent cost against the first arm", multiplier_table(docs),
                   "## Where the calls and tokens went, by agent", agent_table(docs),
                   "## Coordination", coordination_table(docs)]
+    if any(has_evaluator(d) for d in docs):
+        parts += ["## Evaluator", evaluator_table(docs),
+                  "## Evaluator: cost per point of success gained", gain_table(docs),
+                  "## Sent-back proposals counted as attempts (strict reading)",
+                  strict_table(docs)]
+    if any(has_sequences(d) for d in docs):
+        parts += ["## Sequences (two tickets, one customer)", sequence_table(docs)]
+    if any(has_mcp(d) for d in docs):
+        parts += ["## MCP: the cost of the hop", mcp_table(docs)]
+    if any(d.get("phase") == "phase-9" for d in docs):
+        parts += ["## Prompt cache", cache_table(docs)]
     for doc in docs:
         if doc["trials_per_task"] > 1:
             parts += [f"## Per-task variance: {arm_name(doc)}", variance_table(doc)]
@@ -753,7 +931,7 @@ def show_trial(doc: dict, task_id: str, trial: int = 1) -> str:
     record = match[0]
     tr = Transcript.from_dict(record["transcript"])
     verdict = Verdict.from_dict(record["verdict"])
-    task = by_id(load_tasks(doc["task_set"])).get(record["task_id"])
+    task = grading_tasks(doc["task_set"]).get(record["task_id"])
     out = [f"# {record['task_id']} · trial {trial} · {arm_name(doc)}",
            f"log: {record['log']}", "", "## Ticket", tr.ticket.strip(), ""]
     if task:

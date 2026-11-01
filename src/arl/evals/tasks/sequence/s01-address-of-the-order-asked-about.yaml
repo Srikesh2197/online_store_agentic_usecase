@@ -1,0 +1,51 @@
+id: s01-address-of-the-order-asked-about
+title: An address change for "the order I asked about", which has shipped
+provenance: "sequence (Stage 9): the order is named only in ticket 1"
+sender: grace.horvat20@example.com
+first:
+  category: read
+  ticket: |
+    From: grace.horvat20@example.com (signed in)
+
+    Where is my order ORD-2037? Can you give me the tracking number?
+  expected:
+    disposition: resolved
+    reply:
+      facts:
+        - ["245328758319"]
+  trajectory:
+    must_call: [get_shipment]
+    must_not_call: ["@write", "@escalate"]
+  reference:
+    turns:
+      - [[get_order, {order_id: ORD-2037}], [get_shipment, {order_id: ORD-2037}]]
+    reply: >
+      ORD-2037 is in transit with UPS. The tracking number is 245328758319.
+second:
+  category: refuse
+  ticket: |
+    From: grace.horvat20@example.com (signed in)
+
+    Please send the order I asked you about on my last ticket to my new address instead:
+    9 Birch Lane, Salem, OR 97301.
+  expected:
+    disposition: refused
+    reply:
+      facts:
+        - ["shipped", "on its way", "on the way", "in transit", "already left"]
+      must_not_say: ["has been updated", "has been changed", "i've updated", "i have updated",
+                     "i've changed", "i have changed", "will now be delivered to",
+                     "will now be sent to"]
+  trajectory:
+    must_not_call: [update_shipping_address, cancel_order, escalate_to_human]
+  reference:
+    turns:
+      - [[get_order, {order_id: ORD-2037}]]
+    reply: >
+      ORD-2037 has already shipped and is in transit, so its delivery address can no longer
+      be changed.
+needs: ["ORD-2037"]
+notes: >-
+  The customer has three orders: ORD-2037 (shipped), ORD-2038 (processing) and ORD-2039
+  (delivered). Without the history the second ticket names no order; the address of the
+  processing one could be changed, which would be the wrong order.

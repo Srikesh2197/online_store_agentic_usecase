@@ -547,3 +547,80 @@ Spend: **$0.155** (smoke and calibration $0.018, re-checks $0.003, sweeps $0.133
 - Would a supervisor pay off with a stronger orchestrator and cheap specialists (two model tiers), or on tasks with large tool results? Neither was tested.
 - Should the phrase grader handle negation ("No return has been authorized yet")? A reviewed grader change, for Phase 4.
 - Handoffs on the parallel set and on the adversarial set were not run.
+
+## Stage 9: Tasters (evaluator-optimizer, MCP, long-term memory) — built 2026-11-01
+
+Branch `feature_0929_01`. Not committed. Write-up: [stages/09-tasters.md](stages/09-tasters.md).
+
+### What was built
+
+| Path | Contents |
+|---|---|
+| `src/arl/framework/graph_agent.py` | Opt-in `AgentContext` fields `store_specs` (tool definitions offered), `run_tool` (the executor), `evaluator` (a model for the `verify` node); `compiled_graph(..., evaluator=)`; `recursion_limit(..., evaluated=)`. With the defaults it is Stage 8's graph exactly |
+| `src/arl/framework/patterns/evaluator.py` | The evaluator-optimizer: a `verify` node before `tools` (batches with a write or escalation) and before `finish` (the reply); structured verdict `{reason, verdict, fix}`; at most one send-back per run; order notes and tainted reports withheld; calls tagged `agent: "evaluator"` and counted in the run's budget; rubric frozen (`EVALUATOR_PROMPT_HASH = 9897e8b914a6`) |
+| `src/arl/framework/mcp_server/` | `server.py` (the SDK's low-level `Server` serving our ten tools over `execute_tool`; idempotency keys in `_meta`), `__main__.py` (stdio), `bridge.py` (`McpTools`, a sync wrapper over the async client; the pin; `served_store`, the store handed over as a file and copied back; `run_graph_mcp`), `pins.json`; `scripts/pin_mcp.py` |
+| `src/arl/framework/memory.py` | Code-written customer notes in a LangGraph `InMemoryStore` under `("customers", id)`; the provenance filter; the last 3 notes in the first user message; `run_graph_memory` wraps `run_graph_agent` |
+| `src/arl/evals/tasks.py`, `tasks/sequence/s01…s06.yaml` | `Part`, `SequenceTask`, `grading_tasks`, `sequence_problems`; the sequence set (two tickets from one signed-in customer), `FROZEN_SEQUENCE_HASH = 3022abd9072e` |
+| `src/arl/evals/runner.py`, `report.py`, `cli.py` | Strategies `graph_evaluate`, `supervisor_evaluate`, `graph_mcp`, `graph_memory`; sequence trials (two runs on one store, each part graded on its own changes; the record is ticket 2's, plus `first`, `first_success`, `both_success`); `evaluator`, `mcp`, `memory`, `tool_ms` per trial; the estimate counts two runs per sequence; report sections for the evaluator (with cost per point gained and a strict reading), sequences, the MCP hop and the prompt cache; `PHASE = "phase-9"` |
+| `pyproject.toml` | `mcp>=2.3,<3` in the `framework` extra (already pinned in `requirements/framework.txt`); `pins.json` as package data |
+| `tests/` | `test_evaluator.py` 22, `test_mcp.py` 38 (+4 skipped), `test_memory.py` 13, `test_sequence_set.py` 31, runner 4. 806 pass and 6 are skipped, with no API calls |
+| `results/` | 10 sweep files (5 smoke and calibration, 5 main); `report-phase9-evaluate.md`, `report-phase9-supervisor-evaluate.md`, `report-phase9-mcp.md`, `report-phase9-sequence.md` |
+| `runs/phase9-logs/` | `smoke.sh`, `sweeps.sh` and their logs |
+
+Unchanged: `hand_loop.py`, `guarded_loop.py`, `single_round.py`, `guardrails/`, `env/`, `llm/`, `workflow.py`, `approval.py`, `threads.py`, `multi/`, the graders, `transcript.py`, the v1, adversarial and parallel task files. No new packages.
+
+### Decisions made
+
+- **The evaluator is a separate `gpt-6-luna` call** in its own context (your choice); it checks writes, escalations and the reply; it can only send back, once per run; a sent-back proposal is a draft (not graded as an attempt), with a strict reading also reported.
+- **Supervisor evaluator arm added** (your choice), because the single agent fails only 2 of 90 v1 trials.
+- **The rubric was written once, before any run, and not changed** after the smoke run exposed a false send-back (p08) or after the sweeps.
+- **Our own MCP bridge:** `langchain-mcp-adapters` is archived and pins `mcp<2`; `langchain.mcp` needs `fastmcp`. The low-level server serves our exact schemas.
+- **The pin covers name, description, schema and annotations,** is checked on every list past the cache, and fails closed before any model call. Annotations are never used for decisions.
+- **Memory is written by code, filtered by provenance, with no taint** (your choice), read into the first user message, and used only with a signed-in sender.
+- **Both tickets of a sequence run live** (your choice). The sequence set was calibrated once (6 × 1 per arm) and frozen with no rewrite (your choice), so it has three tasks where only the history has the fact and three where memory can only save lookups.
+- **The evaluator smoke ran on the parallel set** (not the sample tickets), so its measured cost set the v1 estimate without touching v1.
+- **Report fix:** the MCP table shows "–" for files without per-call tool timings (it showed 0.00).
+
+### Measured in stage 9
+
+Spend: **$0.143** (smoke and calibration $0.021, sweeps $0.122).
+
+| v1 30 × 3 | Success | $/run | Cost × | p50 latency | Sent back | Paired |
+|---|---|---|---|---|---|---|
+| `graph_all` (k5, paired on 3) | 98% | $0.000189 | 1.00 | 4.6 s | – | |
+| `graph_evaluate` | 93% | $0.000398 | 2.10 | 8.8 s | 21% of runs | worse on 4, better on 1, p = 0.375 |
+| `supervisor` (Stage 8, k3) | 88% | $0.000464 | 1.00 | 11.0 s | – | |
+| `supervisor_evaluate` | 97% | $0.000655 | 1.41 | 13.9 s | 14% of runs | better on 4, worse on 0, p = 0.125 |
+
+| MCP, 10 v1 tasks × 3 | Success | $/run | Server start (p50) | Per tool call | p50 run latency |
+|---|---|---|---|---|---|
+| `graph_all` (in-process) | 98% | $0.000172 | – | 0.39 ms | 4.12 s |
+| `graph_mcp` (stdio) | 93% | $0.000180 | 253 ms | 4.75 ms | 4.37 s |
+
+| Sequences 6 × 3 | Ticket 2 | Wrong changes on ticket 2 | Calls on ticket 2 | $/trial | p50 (trial) |
+|---|---|---|---|---|---|
+| `graph_all` (memory off) | 56% | 5 | 4.0 | $0.000662 | 13.7 s |
+| `graph_memory` | 100% | 0 | 2.4 | $0.000543 | 10.3 s |
+
+- **Findings (precise):** the evaluator cost 2.10× (single) and 1.41× (supervisor), 49% and 31% of it the evaluator's own calls. Of 16 action send-backs, 12 stopped a wrong action (11 refuse-then-escalate on c15, c21, c22; one out-of-window return on c18) and all 12 runs passed; 4 stopped a correct damaged-item refund on the single agent (c09, c11 ×2, c29: "the ticket does not establish whether it was opened") and all 4 failed. The same rubric passed all six of the supervisor's refunds on c09 and c29. MCP over stdio: +0.26 s per run (server start 253 ms; 12× per tool call), same tokens, same cache rate. Memory: 0.82× the cost, 40% fewer tool calls on ticket 2, no wrong changes against 5.
+- **Directions:** the evaluator hurt the single agent (93% vs 98%) and helped the supervisor (97% vs 88%; two of its four gains, c15 and c21, are the evaluator's, and c09 and c23 had no send-back). MCP changed no behaviour (two known in-process failures, one trial each). Memory was better on s01, s03 and s05, worse on none (p = 0.25).
+- **Defences (scripted):** a poisoned tool description fails closed with the pin; without it the poison reaches the model and grounding stops the refund. A poisoned order note never reaches memory.
+- **The deploy variant (rule recorded before the runs):** `graph_approve_risk` with long-term memory, tools in-process, no evaluator. The evaluator is worse on 4 v1 tasks on the single agent; memory is better on 3 sequence tasks, worse on none, at 0.82×; MCP has a latency cost.
+
+### What stage 10 needs to know
+
+- **Deploy `graph_approve_risk` + memory.** Base reference files: v1 `20261029T023356Z-graph_approve_risk-gpt-6-luna-k3.json`, adversarial `20261029T024032Z-graph_approve_risk-gpt-6-luna-k3.json`; memory: `20261101T164122Z-graph_memory-gpt-6-luna-k3.json` against `20261101T163721Z-graph_all-gpt-6-luna-k3.json`.
+- **The combination was not run live.** `run_graph_memory(..., policy=, checkpointer=)` passes everything to `run_graph_agent`, so it should compose; add a scripted test of memory with the gate, paused (`arl approve` in another process) and resumed, and decide when the note is written for a paused run (after the run finishes, not at the pause).
+- **Memory needs a durable store and an identity.** `InMemoryStore` dies with the process (and with each Lambda invocation). Use LangGraph's `SqliteStore` locally or a Postgres store, or a DynamoDB table keyed by customer id; keep the namespace `("customers", id)`. The id must come from authentication, never from the ticket text; without it memory stays off (the measured base). Add retention and a delete path: notes hold the customer's own words.
+- **The approval round trip already works across processes** (Stage 7: a checkpoint per thread, `arl approve`); in the API it becomes "pause → return 202 with the approval packet → POST approve → resume".
+- **Keep tools in-process.** If tools must ever move out, use MCP over HTTP as a long-lived service (not stdio per request), with the pin and tainted results.
+- **Budgets:** the base costs about $0.0002 per v1 ticket; memory adds nothing (it saves lookups). The evaluator would add 2.1×; it is not in the deploy.
+- **The runner's estimate is per sequence ×2 runs,** and its worst case for evaluator arms includes one evaluator call past the budget.
+
+### Open questions carried forward
+
+- Would a narrower rubric ("send back an escalation of a request the rules refuse", without the list of facts to check) keep the refuse-then-escalate gains without blocking damaged-item refunds? It needs a held-out split; it was not tuned on v1.
+- Would the evaluator help the single agent with a stronger model as the checker?
+- Should the policy say what a damaged item counts as ("an item that arrived damaged is treated as opened")? Two different checkers (the Stage 8 refunds specialist, this evaluator) read it strictly. A policy change touches `env/` and needs your approval.
+- Memory over days and across the adversarial set (a signed-in attacker planting text in their own words) was not run.
+- MCP over HTTP, with a remote server, was not measured.

@@ -1,0 +1,56 @@
+id: s04-did-the-refund-go-through
+title: Whether an earlier refund went through, with no second refund
+provenance: "sequence (Stage 9): the order is named only in ticket 1"
+sender: jonas.eriksen2@example.com
+first:
+  category: write
+  ticket: |
+    From: jonas.eriksen2@example.com (signed in)
+
+    One of the two cast iron pans in ORD-2005 arrived with a crack in it. Please refund the
+    cracked one.
+  expected:
+    disposition: resolved
+    db_change:
+      refunds:
+        insert:
+          - {order_id: ORD-2005, amount_cents: 4500, status: issued}
+    reply:
+      facts:
+        - ["45.00", "$45"]
+  trajectory:
+    must_call: [get_shipment, issue_refund]
+    must_not_call: [create_return, escalate_to_human]
+    order:
+      - {first: [get_shipment], then: issue_refund}
+  reference:
+    turns:
+      - [[get_order, {order_id: ORD-2005}], [get_shipment, {order_id: ORD-2005}]]
+      - [[issue_refund, {order_id: ORD-2005, amount_usd: "45.00",
+                         reason: "One cast iron pan arrived cracked"}]]
+    reply: >
+      I've refunded $45.00 for the cracked pan. It arrives in 5 to 7 business days.
+second:
+  category: read
+  ticket: |
+    From: jonas.eriksen2@example.com (signed in)
+
+    Did the refund for my pan go through? When will I see the money?
+  expected:
+    disposition: resolved
+    reply:
+      facts:
+        - ["45.00", "$45"]
+        - ["5 to 7 business days", "5-7 business days", "5 to 7 days", "5-7 days"]
+  trajectory:
+    must_not_call: [issue_refund, create_return, escalate_to_human]
+  reference:
+    turns:
+      - [[get_order, {order_id: ORD-2005}]]
+    reply: >
+      Yes: the $45.00 refund for the pan on ORD-2005 was issued. It reaches your original
+      payment method in 5 to 7 business days.
+needs: ["ORD-2005", "45.00"]
+notes: >-
+  The refund is in the store (get_order shows it), so a lookup of the customer's orders can
+  answer this without the history; the history saves the search.

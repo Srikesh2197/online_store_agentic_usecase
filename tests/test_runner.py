@@ -414,3 +414,82 @@ def test_the_cli_knows_the_multi_agent_strategies_and_the_parallel_set(monkeypat
                                               "-k", "1", "--strategy", strategy])
         assert result.exit_code == 0, result.output
         assert strategy in result.output and "8 tasks" in result.output
+
+
+# --- Stage 9: the tasters through the same harness ------------------------------------------
+
+def test_sweep_runs_the_evaluated_agent_and_records_its_checks(tmp_path, monkeypatch):
+    from scripted import ScriptedModel, calls, reply
+    from wire import wire_setup
+
+    verdict = reply(json.dumps({"reason": "Allowed while processing.", "verdict": "pass",
+                                "fix": ""}))
+    monkeypatch.setattr("arl.framework.patterns.evaluator.make_chat_model",
+                        lambda model: wire_setup(ScriptedModel("openai", verdict, verdict,
+                                                               prefix="ev_"), "openai"))
+    doc = _framework_sweep(
+        tmp_path, monkeypatch, "graph_evaluate",
+        calls(("get_order", {"order_id": "ORD-1003"})),
+        calls(("cancel_order", {"order_id": "ORD-1003", "reason": "Wrong lamp"})),
+        reply("Your order ORD-1003 is cancelled."))
+    assert all(t["success"] for t in doc["trials"]), [t["verdict"] for t in doc["trials"]]
+    trial = doc["trials"][0]
+    assert trial["model_calls"] == 5
+    assert trial["evaluator"] == {"checks": 2, "errors": 0,
+                                  "by_point": {"action": 1, "reply": 1}, "revisions": []}
+    assert set(trial["agents"]["agents"]) == {"main", "evaluator"}
+    from arl.evals import report
+
+    single = _framework_sweep(
+        tmp_path, monkeypatch, "graph_all", calls(("get_order", {"order_id": "ORD-1003"})),
+        calls(("cancel_order", {"order_id": "ORD-1003", "reason": "Wrong lamp"})),
+        reply("Your order ORD-1003 is cancelled."))
+    text = report.full_report([single, doc])
+    assert "## Evaluator" in text and "no gain" in text
+    assert "## Prompt cache" in text
+
+
+def test_sweep_runs_the_graph_agent_with_its_tools_over_mcp(tmp_path, monkeypatch):
+    from scripted import calls, reply
+
+    doc = _framework_sweep(
+        tmp_path, monkeypatch, "graph_mcp",
+        calls(("get_order", {"order_id": "ORD-1003"})),
+        calls(("cancel_order", {"order_id": "ORD-1003", "reason": "Wrong lamp"})),
+        reply("Your order ORD-1003 is cancelled."))
+    assert all(t["success"] for t in doc["trials"]), [t["verdict"] for t in doc["trials"]]
+    hop = doc["trials"][0]["mcp"]
+    assert hop["transport"] == "stdio" and hop["tools"] == 10 and hop["pin"] == "checked"
+    assert doc["trials"][0]["transcript"]["db_diff"]["orders"]["update"]
+    from arl.evals import report
+
+    assert "## MCP: the cost of the hop" in report.full_report([doc])
+
+
+def test_the_stage_9_strategies_are_registered_and_bounded(tmp_path):
+    for name in ("graph_evaluate", "supervisor_evaluate", "graph_mcp", "graph_memory"):
+        plan = runner.STRATEGIES[name]
+        assert plan.invariants and plan.max_usd == 0.01
+        est = estimate(TASKS, "gpt-6-luna", 1, tmp_path / "results", strategy=name)
+        assert 0 < est.per_trial_worst < 0.2, name
+    assert runner.STRATEGIES["graph_memory"].memory
+    assert not runner.STRATEGIES["graph_all"].memory
+    assert runner.STRATEGIES["supervisor_evaluate"].cost_basis == "supervisor"
+    evaluated = estimate(TASKS, "gpt-6-luna", 1, tmp_path / "results", strategy="graph_evaluate")
+    graph = estimate(TASKS, "gpt-6-luna", 1, tmp_path / "results", strategy="graph_all")
+    assert evaluated.per_trial_worst > graph.per_trial_worst
+
+
+def test_the_cli_knows_the_stage_9_strategies_and_the_sequence_set(monkeypatch):
+    from arl import cli
+
+    monkeypatch.setattr("arl.llm.make_adapter", lambda model: (_ for _ in ()).throw(
+        AssertionError("a dry run must not build an adapter")))
+    result = CliRunner().invoke(cli.app, ["eval", "--dry-run", "--task-set", "sequence",
+                                          "-k", "1", "--strategy", "graph_memory"])
+    assert result.exit_code == 0, result.output
+    assert "6 tasks" in result.output and "x2 runs per trial" in result.output
+    for strategy in ("graph_evaluate", "supervisor_evaluate", "graph_mcp"):
+        result = CliRunner().invoke(cli.app, ["eval", "--dry-run", "--tasks", "c01", "-k", "1",
+                                              "--strategy", strategy])
+        assert result.exit_code == 0, result.output

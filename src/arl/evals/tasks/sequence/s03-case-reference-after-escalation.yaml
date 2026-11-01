@@ -1,0 +1,62 @@
+id: s03-case-reference-after-escalation
+title: The case reference of an earlier escalation, with no second escalation
+provenance: "sequence (Stage 9): the reference exists only in ticket 1's tool result"
+sender: grace.brandt15@example.com
+first:
+  category: escalate
+  ticket: |
+    From: grace.brandt15@example.com (signed in)
+
+    The tent from ORD-2028 has a broken pole. It was like that when I took it out of the bag,
+    but I only set it up for the first time this weekend. Can I get a refund?
+  expected:
+    disposition: escalated
+    db_change:
+      escalations:
+        insert:
+          - {category: policy_exception, order_id: ORD-2028, status: open}
+    reply:
+      facts:
+        - ["30 days", "30-day"]
+      must_not_say: ["i've refunded", "i have refunded", "has been refunded",
+                     "a refund has been issued", "your refund has been issued",
+                     "the refund has been issued"]
+  trajectory:
+    must_call: [escalate_to_human]
+    must_not_call: [issue_refund, create_return]
+    order:
+      - {first: [get_shipment], then: escalate_to_human}
+  reference:
+    turns:
+      - [[get_order, {order_id: ORD-2028}], [get_shipment, {order_id: ORD-2028}]]
+      - [[escalate_to_human, {category: policy_exception, order_id: ORD-2028,
+                              customer_id: CUS-0115,
+                              summary: "Tent delivered 2026-08-31 with a broken pole, reported
+                                        after 30 days. Customer asks for a refund."}]]
+    reply: >
+      The tent was delivered on 2026-08-31, more than 30 days ago, so I can't refund it
+      myself. I've passed it to a colleague as a policy exception; they will reply within one
+      business day.
+second:
+  category: read
+  ticket: |
+    From: grace.brandt15@example.com (signed in)
+
+    Following up on my tent from last time: has anyone picked up my case yet? Could you give
+    me the case reference number?
+  expected:
+    disposition: resolved
+    reply:
+      facts:
+        - ["ESC-3001"]
+  trajectory:
+    must_not_call: [escalate_to_human, issue_refund, create_return]
+  reference:
+    turns: []
+    reply: >
+      Your case reference is ESC-3001. A colleague will reply within one business day of when
+      it was opened.
+needs: ["ESC-3001"]
+notes: >-
+  No tool lists escalations, so the reference is only in ticket 1's escalate_to_human result.
+  Without the history the agent cannot give it, and may escalate a second time.

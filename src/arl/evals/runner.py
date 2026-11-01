@@ -9,8 +9,11 @@ The agent under test is a strategy: rung 1 (`single_round`), rung 2 (`hand_loop`
 unchanged, rung 2 with guardrails (`guarded_prompt`, `guarded_all`, Stage 5), or the Stage 6
 framework strategies on LangGraph: the graph agent (`graph_off`, `graph_all`) and the
 workflow (`workflow`), the Stage 7 graph agent with an approval gate answered by the
-scripted reviewer (`graph_approve_all`, `graph_approve_risk`), and the Stage 8 multi-agent
-patterns (`supervisor`, `handoffs`). The runner gives it a fresh store with the task's environment (its
+scripted reviewer (`graph_approve_all`, `graph_approve_risk`), the Stage 8 multi-agent
+patterns (`supervisor`, `handoffs`), and the Stage 9 tasters: the graph agent and the
+supervisor with an evaluator (`graph_evaluate`, `supervisor_evaluate`), with its tools over
+MCP (`graph_mcp`), and with long-term memory (`graph_memory`). A sequence task (Stage 9) is two
+runs on one store, sharing the memory when the strategy has one. The runner gives it a fresh store with the task's environment (its
 setup, faults and sender, and the arm's invariants) and a tracer, and afterwards records what
 the store looks like. Every strategy is graded from the same trace events.
 """
@@ -19,6 +22,7 @@ import csv
 import json
 import statistics
 import subprocess
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
@@ -50,7 +54,7 @@ from arl.tracing.tracer import RUNS_DIR, Tracer, read_events
 RESULTS_DIR = ROOT / "results"
 LEDGER_NAME = "spend.csv"
 EVAL_RUNS_DIR = RUNS_DIR / "eval"
-PHASE = "phase-8"
+PHASE = "phase-9"
 PHASE_BUDGET_USD = 1.00
 
 
@@ -67,6 +71,8 @@ class Strategy:
     # (tokens, input price, output price) -> a trial's worst case, for strategies whose calls
     # are not one growing conversation (Stage 8). None: the default below.
     worst_case: Callable | None = None
+    memory: bool = False   # takes a `memory` store, shared by the runs of a sequence (Stage 9)
+    worst_note: str | None = None   # how `worst_case` is bounded, for the dry run
 
 
 def _guarded(profile: str, **fields) -> Strategy:
@@ -168,6 +174,58 @@ def _multi(name: str) -> Strategy:
                     max_usd=guards.limits.max_usd)
 
 
+def _evaluated_worst(tokens: float, input_price: float, output_price: float) -> float:
+    """The evaluated agent's worst trial. Without a budget: its 11 calls and an evaluator
+    call after each. With the budget: the budget, then the call that crossed it, an evaluator
+    call, the reply-only call and a truncation retry, at the largest history."""
+    calls = MAX_STEPS + 1
+    unbounded = 2 * worst_trial_cost(tokens, input_price, output_price, calls)
+    last = (worst_trial_cost(tokens, input_price, output_price, calls)
+            - worst_trial_cost(tokens, input_price, output_price, calls - 1))
+    return min(unbounded, PROFILES["guarded_all"].limits.max_usd + 4 * last)
+
+
+def _tasters(name: str) -> Strategy:
+    """Stage 9: the graph agent (and for the evaluator also the supervisor) with graph_all's
+    guardrails plus one taster. Imported on first use."""
+    guards = PROFILES["guarded_all"]
+
+    def run(ticket, **kwargs):
+        if name in ("graph_evaluate", "supervisor_evaluate"):
+            from arl.framework.patterns.evaluator import evaluator_model
+            kwargs["evaluator"] = evaluator_model(kwargs["adapter"].model)
+            if name == "supervisor_evaluate":
+                from arl.framework.multi.supervisor import run_supervisor
+                return run_supervisor(ticket, strategy=name, **kwargs)
+            from arl.framework.graph_agent import run_graph_agent
+            return run_graph_agent(ticket, guards=guards, strategy=name, **kwargs)
+        if name == "graph_mcp":
+            from arl.framework.mcp_server.bridge import run_graph_mcp
+            return run_graph_mcp(ticket, guards=guards, strategy=name, **kwargs)
+        from arl.framework.memory import run_graph_memory
+        return run_graph_memory(ticket, guards=guards, strategy=name, **kwargs)
+
+    common = {"prior_calls": 4, "invariants": guards.invariants,
+              "max_usd": guards.limits.max_usd}
+    if name == "graph_evaluate":
+        return Strategy(name, run, max_calls=2 * (MAX_STEPS + 1), cost_basis="graph_all",
+                        worst_case=_evaluated_worst, worst_note=(
+                            f"the ${guards.limits.max_usd:.4f} per-run budget plus 4 calls past "
+                            "it (one an evaluator call)"), **common)
+    if name == "supervisor_evaluate":
+        from arl.framework.multi import MAX_DELEGATIONS, SUB_MAX_STEPS
+        max_calls = 2 * (MAX_STEPS + 1) + MAX_DELEGATIONS * (SUB_MAX_STEPS + 1)
+        return Strategy(name, run, max_calls=max_calls, cost_basis="supervisor",
+                        worst_case=lambda *a: _supervisor_worst(*a) + 2 * (
+                            _evaluated_worst(*a) - PROFILES["guarded_all"].limits.max_usd),
+                        worst_note=(f"the ${guards.limits.max_usd:.4f} run pool, plus what the "
+                                    "specialists, the supervisor and its evaluator can still "
+                                    "call once it trips"),
+                        **{**common, "prior_calls": 8})
+    return Strategy(name, run, max_calls=MAX_STEPS + 1, cost_basis="graph_all",
+                    memory=name == "graph_memory", **common)
+
+
 STRATEGIES = {
     "single_round": Strategy("single_round", run_single_round, max_calls=2, prior_calls=2),
     "hand_loop": Strategy("hand_loop", run_hand_loop, max_calls=MAX_STEPS, prior_calls=4),
@@ -180,6 +238,10 @@ STRATEGIES = {
     "graph_approve_risk": _approval("graph_approve_risk", "risk_tiered"),
     "supervisor": _multi("supervisor"),
     "handoffs": _multi("handoffs"),
+    "graph_evaluate": _tasters("graph_evaluate"),
+    "supervisor_evaluate": _tasters("supervisor_evaluate"),
+    "graph_mcp": _tasters("graph_mcp"),
+    "graph_memory": _tasters("graph_memory"),
 }
 DEFAULT_STRATEGY = "single_round"
 # Request characters per input token, measured from the recorded t1 bodies in
@@ -245,7 +307,8 @@ def measured_trial_costs(model: str, results_dir: Path = RESULTS_DIR,
     for path in sorted(Path(results_dir).glob("*.json")):
         doc = json.loads(path.read_text())
         if doc.get("model") == model and doc.get("strategy") == strategy:
-            costs += [t["cost_usd"] for t in doc["trials"] if not t["error"]]
+            # per run: a sequence trial (Stage 9) is two runs
+            costs += [t["cost_usd"] / t.get("runs", 1) for t in doc["trials"] if not t["error"]]
     return costs
 
 
@@ -294,8 +357,17 @@ def estimate(tasks: list[Task], model: str, trials_per_task: int,
         basis = (f"prior: {plan.prior_calls} calls, {round(tokens)} input tokens per call from "
                  f"the request size, {PRIOR_OUTPUT_TOKENS_PER_CALL} output tokens per call, "
                  "no cache")
+    runs = runs_per_trial(tasks)
+    if runs > 1:
+        expected, worst = runs * expected, runs * worst
+        basis += f"; x{runs} runs per trial (sequences)"
     return Estimate(model, len(tasks) * trials_per_task, round(tokens), expected, worst, basis,
                     strategy)
+
+
+def runs_per_trial(tasks) -> int:
+    from arl.evals.tasks import SequenceTask
+    return 2 if any(isinstance(t, SequenceTask) for t in tasks) else 1
 
 
 # --- Ledger --------------------------------------------------------------------------
@@ -409,24 +481,21 @@ def agents_of(events: list[dict]) -> dict | None:
     }
 
 
-def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
-              langfuse=None, strategy: str = DEFAULT_STRATEGY) -> dict:
-    """One attempt at one task. API failures become an error trial; Ctrl-C propagates."""
-    run_id = f"{sweep_id}-{task.id}-k{trial}"
+def _run_one(task: Task, run_id: str, *, conn, before: dict, adapter, sweep_id: str,
+             runs_dir: Path, langfuse, strategy: str, extra: dict) -> tuple:
+    """One run on `conn`: the strategy, then the end state against `before`."""
     tracer = Tracer(run_id, log_dir=Path(runs_dir) / sweep_id, langfuse=langfuse, phase=PHASE)
     plan = STRATEGIES[strategy]
-    conn = trial_store(task, invariants=plan.invariants)
     error = None
     try:
         plan.run(task.ticket.strip(), ticket_id=task.id, conn=conn, adapter=adapter,
-                 tracer=tracer)
+                 tracer=tracer, **extra)
     except Exception as exc:  # noqa: BLE001 -- an API or harness failure, not a wrong answer
         error = f"{type(exc).__name__}: {exc}"
     finally:
         faults = env_of(conn).faults
-        tracer.event("end_state", db_diff=diff(_baseline(task), snapshot(conn)),
+        tracer.event("end_state", db_diff=diff(before, snapshot(conn)),
                      **({"faults_fired": faults.fired} if faults else {}))
-        conn.close()
     events = read_events(tracer.path)
     if any(e["type"] == "run_start" for e in events):
         transcript = Transcript.from_events(events)
@@ -435,6 +504,10 @@ def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
                                 db_diff=events[-1]["db_diff"])
     if error and not transcript.error:
         transcript = replace(transcript, error=error)
+    return tracer, events, transcript
+
+
+def _record(task: Task, trial: int, run_id: str, tracer, events, transcript) -> dict:
     verdict = grade(task, transcript)
     attack = grade_attack(task, transcript)
     return {
@@ -458,8 +531,105 @@ def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
         "safety": safety(task, transcript).to_dict(),
         "approvals": approvals_of(events),
         "agents": agents_of(events),
+        "evaluator": evaluator_of(events),
+        "mcp": mcp_of(events),
+        "memory": memory_of(events),
+        "tool_ms": round(sum(e.get("latency_ms", 0) for e in events if e["type"] == "tool_call"),
+                         2),
         "transcript": transcript.to_dict(),
     }
+
+
+def evaluator_of(events: list[dict]) -> dict | None:
+    """The evaluator's work in a trial (Stage 9): its checks, what it sent back and why, and
+    answers it could not read. None when the run had no evaluator."""
+    verdicts = [e for e in events if e["type"] == "evaluator_verdict"]
+    errors = [e for e in events if e["type"] == "evaluator_error"]
+    if not verdicts and not errors:
+        return None
+    return {"checks": len(verdicts) + len(errors), "errors": len(errors),
+            "by_point": dict(Counter(e["point"] for e in verdicts)),
+            "revisions": [{k: e[k] for k in ("point", "proposed", "reason", "fix")}
+                          for e in verdicts if e["verdict"] == "revise"]}
+
+
+def mcp_of(events: list[dict]) -> dict | None:
+    """The MCP hop in a trial (Stage 9): connect and list time. None without MCP."""
+    connect = next((e for e in events if e["type"] == "mcp_connect"), None)
+    if connect is None:
+        return None
+    return {k: connect[k] for k in ("transport", "connect_ms", "list_ms", "tools", "pin")}
+
+
+def memory_of(events: list[dict]) -> dict | None:
+    """What the run read from long-term memory (Stage 9). None without memory."""
+    read = next((e for e in events if e["type"] == "memory_read"), None)
+    return {"notes": read["notes"], "chars": read["chars"]} if read else None
+
+
+def run_trial(task: Task, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
+              langfuse=None, strategy: str = DEFAULT_STRATEGY) -> dict:
+    """One attempt at one task. API failures become an error trial; Ctrl-C propagates."""
+    from arl.evals.tasks import SequenceTask
+
+    if isinstance(task, SequenceTask):
+        return run_sequence_trial(task, trial, adapter=adapter, sweep_id=sweep_id,
+                                  runs_dir=runs_dir, langfuse=langfuse, strategy=strategy)
+    run_id = f"{sweep_id}-{task.id}-k{trial}"
+    plan = STRATEGIES[strategy]
+    conn = trial_store(task, invariants=plan.invariants)
+    try:
+        tracer, events, transcript = _run_one(
+            task, run_id, conn=conn, before=_baseline(task), adapter=adapter,
+            sweep_id=sweep_id, runs_dir=runs_dir, langfuse=langfuse, strategy=strategy,
+            extra={})
+    finally:
+        conn.close()
+    return _record(task, trial, run_id, tracer, events, transcript)
+
+
+def _sum_usage(a: dict, b: dict) -> dict:
+    return {k: a.get(k, 0) + b.get(k, 0) for k in a.keys() | b.keys()}
+
+
+def run_sequence_trial(seq, trial: int, *, adapter, sweep_id: str, runs_dir: Path,
+                       langfuse=None, strategy: str = DEFAULT_STRATEGY) -> dict:
+    """A sequence (Stage 9): its two tickets run one after the other on one store, sharing a
+    fresh memory when the strategy has one. Each part is graded on its own changes; the
+    record is the second ticket's (the headline), with the first's beside it and the costs of
+    both. If the first run fails with an error, the second is not run."""
+    plan = STRATEGIES[strategy]
+    first, second = seq.parts
+    conn = trial_store(first, invariants=plan.invariants)
+    extra = {}
+    if plan.memory:
+        from langgraph.store.memory import InMemoryStore
+        extra["memory"] = InMemoryStore()
+    records = []
+    try:
+        for n, part in ((1, first), (2, second)):
+            run_id = f"{sweep_id}-{seq.id}-k{trial}-t{n}"
+            tracer, events, transcript = _run_one(
+                part, run_id, conn=conn, before=snapshot(conn), adapter=adapter,
+                sweep_id=sweep_id, runs_dir=runs_dir, langfuse=langfuse, strategy=strategy,
+                extra=extra)
+            records.append(_record(part, trial, run_id, tracer, events, transcript))
+            if transcript.error:
+                break
+    finally:
+        conn.close()
+    one, two = records[0], records[-1] if len(records) == 2 else None
+    if two is None:   # the first run failed: an error trial
+        return {**one, "task_id": seq.id, "category": seq.category, "runs": 1, "first": one,
+                "first_success": False, "both_success": False}
+    return {**two, "task_id": seq.id, "category": seq.category, "runs": 2, "first": one,
+            "first_success": one["success"], "both_success": one["success"] and two["success"],
+            "error": two["error"] or one["error"],
+            "model_calls": one["model_calls"] + two["model_calls"],
+            "tool_calls": one["tool_calls"] + two["tool_calls"],
+            "usage": _sum_usage(one["usage"], two["usage"]),
+            "cost_usd": one["cost_usd"] + two["cost_usd"],
+            "latency_ms": (one["latency_ms"] or 0) + (two["latency_ms"] or 0)}
 
 
 # --- Sweep ---------------------------------------------------------------------------

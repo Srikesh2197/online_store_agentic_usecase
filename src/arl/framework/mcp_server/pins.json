@@ -1,0 +1,17 @@
+{
+ "arl-store": {
+  "set": "e192da4597d21f91",
+  "tools": {
+   "cancel_order": "68e73649beac31e5",
+   "create_return": "a72a6ccee1cb597b",
+   "escalate_to_human": "ec2ff1d8ddd510be",
+   "find_customer": "6972a322db023e7c",
+   "get_customer": "db873eefcc5f5b06",
+   "get_order": "839d49fed5a96f12",
+   "get_shipment": "4a8b1fdfc71440df",
+   "issue_refund": "cd111a34a2fde98b",
+   "list_orders": "2f2cd373014a0263",
+   "update_shipping_address": "329b7d0afccde9e9"
+  }
+ }
+}
